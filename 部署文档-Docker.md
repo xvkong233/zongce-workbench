@@ -19,6 +19,17 @@ docker compose up -d --build
 
 首次启动自动在命名卷中创建 `zongce.db`，并写入默认管理员 `admin / admin123`（**登录后立即改密**）。浏览器访问 `http://服务器IP:8300` 即可。
 
+### 构建镜像源（默认开启）
+
+`pip install` 默认走清华 PyPI 源、`npm ci` 默认走 npmmirror（国内构建速度快）。构建机在**境外**时设为关闭，改用官方源：
+
+```bash
+USE_CN_MIRROR=false docker compose up -d --build
+# 或写入 .env：echo "USE_CN_MIRROR=false" >> .env
+```
+
+等价的裸 `docker build` 写法：`docker build --build-arg USE_CN_MIRROR=false -t zongce-workbench .`（默认不加参数 = 走镜像源）。
+
 > 无需本机安装 Node 或 Python——前端构建、依赖安装全部在镜像内完成。
 > 目录名为中文时 compose 无法自动推导项目名，`docker-compose.yml` 已显式指定 `name: zongce`。
 
@@ -72,6 +83,7 @@ docker compose up -d
 |---|---|---|
 | `ZONGCE_JWT_SECRET` | 内置默认值 | **生产环境务必修改**（见下） |
 | `ZONGCE_DATA_DIR` | `/data` | 容器内数据目录，一般无需改动 |
+| `USE_CN_MIRROR` | `true` | 构建期开关：默认 pip 走清华源、npm 走 npmmirror；境外构建设 `false` |
 | 端口映射 | `8300:8300` | 改 compose 左侧宿主机端口即可，如 `80:8300` |
 
 在项目根目录创建 `.env` 设置密钥（compose 自动读取）：

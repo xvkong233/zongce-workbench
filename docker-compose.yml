@@ -3,7 +3,11 @@ name: zongce
 
 services:
   zongce:
-    build: .
+    build:
+      context: .
+      # 默认国内镜像源加速：pip 走清华源、npm 走 npmmirror；境外构建设 USE_CN_MIRROR=false
+      args:
+        USE_CN_MIRROR: ${USE_CN_MIRROR:-true}
     image: zongce-workbench:latest
     container_name: zongce
     restart: unless-stopped
