@@ -52,6 +52,9 @@ def update_user(user_id: int, body: UserIn, db: Session = Depends(get_db),
     u = db.get(User, user_id)
     if not u:
         raise HTTPException(404, {"message": "账号不存在"})
+    if u.role == "admin":
+        # 本页只管理辅导员账号：避免误禁用/清空管理员导致系统失去管理员
+        raise HTTPException(400, {"message": "管理员账号不支持在此编辑（请在右上角修改密码）"})
     u.real_name = body.real_name
     u.enabled = body.enabled
     u.grades = db.query(Grade).filter(Grade.id.in_(body.grade_ids)).all() if body.grade_ids else []
@@ -75,6 +78,8 @@ def delete_user(user_id: int, db: Session = Depends(get_db), user: User = Depend
         raise HTTPException(404, {"message": "账号不存在"})
     if u.id == user.id:
         raise HTTPException(400, {"message": "不能删除当前登录账号"})
+    if u.role == "admin":
+        raise HTTPException(400, {"message": "管理员账号不支持删除"})
     db.delete(u)
     db.add(OperationLog(operator_id=user.id, operator_name=user.username,
                         action="删除辅导员", detail=u.username))
@@ -92,10 +97,13 @@ def list_logs(operator: str = "", action: str = "", start: str = "", end: str = 
         q = q.filter(OperationLog.operator_name.like(f"%{operator}%"))
     if action:
         q = q.filter(OperationLog.action.like(f"%{action}%"))
-    if start:
-        q = q.filter(OperationLog.created_at >= datetime.fromisoformat(start))
-    if end:
-        q = q.filter(OperationLog.created_at <= datetime.fromisoformat(end) + timedelta(days=1))
+    try:
+        if start:
+            q = q.filter(OperationLog.created_at >= datetime.fromisoformat(start))
+        if end:
+            q = q.filter(OperationLog.created_at <= datetime.fromisoformat(end) + timedelta(days=1))
+    except ValueError:
+        raise HTTPException(400, {"message": "时间筛选格式应为 YYYY-MM-DD"})
     total = q.count()
     rows = q.order_by(OperationLog.created_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
     return {"total": total, "items": [{

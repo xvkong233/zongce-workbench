@@ -106,7 +106,8 @@ if DIST.exists():
 
     @app.get("/{full_path:path}", include_in_schema=False)
     def spa(full_path: str):
-        target = DIST / full_path
-        if full_path and target.is_file():
+        # 仅允许访问 dist 内的文件：resolve 后必须在 DIST 内，防止 /../ 路径穿越读取任意文件
+        target = (DIST / full_path).resolve()
+        if full_path and target.is_file() and target.is_relative_to(DIST.resolve()):
             return FileResponse(target)
         return FileResponse(DIST / "index.html")

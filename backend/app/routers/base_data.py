@@ -247,6 +247,12 @@ def list_students(class_id: int | None = None, keyword: str = "", page: int = 1,
     allowed = counselor_grade_ids(user)
     q = db.query(Student)
     if class_id:
+        # 指定班级时同样校验年级权限（否则辅导员可用任意 class_id 越权查询）
+        klass = db.get(ClassInfo, class_id)
+        if not klass:
+            raise HTTPException(404, {"message": "班级不存在"})
+        if allowed is not None and klass.grade_id not in allowed:
+            raise HTTPException(403, {"message": "无权查看该班级学生"})
         q = q.filter_by(class_id=class_id)
     elif allowed is not None:
         q = q.join(ClassInfo).filter(ClassInfo.grade_id.in_(allowed))
@@ -315,11 +321,19 @@ def update_student(student_id: int, body: StudentIn, db: Session = Depends(get_d
     allowed = counselor_grade_ids(user)
     if allowed is not None and (not s.klass or s.klass.grade_id not in allowed):
         raise HTTPException(403, {"message": "无权修改该学生"})
-    dup = db.query(Student).filter(Student.student_no == body.student_no, Student.id != student_id).first()
+    no, name = body.student_no.strip(), body.name.strip()
+    if not no or not name:
+        raise HTTPException(400, {"message": "学号与姓名不能为空"})
+    klass = db.get(ClassInfo, body.class_id)
+    if not klass:
+        raise HTTPException(404, {"message": "目标班级不存在"})
+    if allowed is not None and klass.grade_id not in allowed:
+        raise HTTPException(403, {"message": "无权将学生转入该班级（年级不在所辖范围）"})
+    dup = db.query(Student).filter(Student.student_no == no, Student.id != student_id).first()
     if dup:
-        raise HTTPException(400, {"message": f"学号 {body.student_no} 已存在（{dup.name}）"})
+        raise HTTPException(400, {"message": f"学号 {no} 已存在（{dup.name}）"})
     old = f"{s.student_no} {s.name} {s.klass.name if s.klass else ''}"
-    s.student_no, s.name, s.class_id = body.student_no.strip(), body.name.strip(), body.class_id
+    s.student_no, s.name, s.class_id = no, name, klass.id
     _log(db, user, "修正学籍", f"{old} → {s.student_no} {s.name}")
     db.commit()
     return {"ok": True}

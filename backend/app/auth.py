@@ -45,9 +45,10 @@ def get_current_user(request: Request, db: Session = Depends(get_db)) -> User:
         raise CREDENTIAL_ERROR
     try:
         payload = jwt.decode(header[7:], JWT_SECRET, algorithms=["HS256"])
-    except jwt.PyJWTError:
+        user = db.get(User, int(payload["sub"]))
+    except (jwt.PyJWTError, KeyError, TypeError, ValueError):
+        # 签名无效 / 缺少 sub / sub 非数字：一律视为凭证失效，而非 500
         raise CREDENTIAL_ERROR
-    user = db.get(User, int(payload["sub"]))
     if not user or not user.enabled or user.token_version != payload.get("tv"):
         raise CREDENTIAL_ERROR
     return user
