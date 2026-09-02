@@ -1,0 +1,15 @@
+# 统一换行：仓库内存 LF，工作区按平台自动处理
+* text=auto eol=lf
+
+# Windows 批处理必须 CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# 二进制资产
+*.png binary
+*.ico binary
+*.svg text
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.db binary

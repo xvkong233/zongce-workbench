@@ -1,0 +1,19 @@
+# 构建上下文瘦身：样本数据、截图、调试产物一律不进镜像
+**/node_modules
+**/__pycache__
+**/.pytest_cache
+**/venv
+**/.git
+
+.playwright-mcp
+data-walkthrough
+data
+frontend/app/dist
+
+*.xlsx
+*.xls
+*.png
+*.log
+*.yml
+
+*.md

@@ -1,0 +1,25 @@
+# 目录名为中文时 Compose 无法自动推导项目名，这里显式指定
+name: zongce
+
+services:
+  zongce:
+    build: .
+    image: zongce-workbench:latest
+    container_name: zongce
+    restart: unless-stopped
+    ports:
+      - "8300:8300"
+    environment:
+      # 改成你自己的随机字符串；更换后所有登录态失效，需重新登录
+      - ZONGCE_JWT_SECRET=${ZONGCE_JWT_SECRET:-zongce-workbench-secret-change-me}
+      - ZONGCE_DATA_DIR=/data
+      - TZ=Asia/Shanghai
+    volumes:
+      # 数据持久化：SQLite 数据库存放在命名卷 zongce-data 中，
+      # 容器删除/重建/升级镜像后数据不丢失（docker volume rm 才会删数据）。
+      # Linux 服务器若想直接看到数据文件（便于面板备份），可改为 bind mount：
+      #   - ./data:/data
+      - zongce-data:/data
+
+volumes:
+  zongce-data:

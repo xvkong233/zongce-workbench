@@ -1,0 +1,47 @@
+# ===== 敏感/私有数据：绝不入库 =====
+# SQLite 数据库及 WAL 文件、备份
+data/
+*.db
+*.db-wal
+*.db-shm
+*.db.bak*
+
+# 学生成绩样本与导出文件（含真实个人信息）
+*.xls
+*.xlsx
+*.xlsb
+export_*/
+export_*.xlsx
+output*.xlsx
+
+# 运维生成的密钥
+.env
+.env.*
+
+# ===== 依赖与构建产物 =====
+node_modules/
+frontend/app/dist/
+backend/venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# ===== 调试与过程产物 =====
+.playwright-mcp/
+data-walkthrough/
+walkthrough-*.png
+*.log
+
+# ===== 工具目录（本机助手配置）=====
+.claude/
+.agents/
+
+# ===== 编辑器/系统 =====
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# husky 生成物（脚本本身保留）
+frontend/.husky/_/
