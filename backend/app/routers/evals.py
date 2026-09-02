@@ -119,13 +119,19 @@ def roster(academic_year_id: int, class_id: int, db: Session = Depends(get_db),
 
 
 def _save_eval_records(db: Session, user: User, body: EvalSaveIn) -> list[str]:
-    """写入单个学生的综测记录（不提交事务），返回明细不符的项目名。"""
+    """写入单个学生的综测记录（不提交事务），返回明细不符的项目名。
+
+    明细与得分均为空的项跳过不落库——否则会产生 score=0 的幽灵记录，
+    使该生在计算中被视为「已录入综测」，综合测评成绩被拉低。"""
     s = db.get(Student, body.student_id)
     if not s:
         raise HTTPException(404, {"message": "学生不存在"})
     _class_and_access(db, user, s.class_id)
     mismatches = []
     for it in body.items:
+        empty = not it.detail_text.strip() and it.score == 0
+        if empty:
+            continue
         soft = sum_detail_terms(it.detail_text) if it.detail_text else None
         if soft is not None and abs(soft - it.score) > 0.05:
             mismatches.append(it.item_name)
@@ -275,26 +281,33 @@ def copy_prev(body: CopyPrevIn, db: Session = Depends(get_db), user: User = Depe
 
 @router.post("/fill-base")
 def fill_base(body: FillBaseIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    """批量填充基础分模板：按方案模板自动换算得分。"""
+    """批量填充基础分模板：按方案模板自动换算得分。
+
+    only_missing=True 时跳过已有任何综测记录的学生；否则也逐项跳过
+    已存在的（student, item）记录，避免撞唯一约束。"""
     klass = _class_and_access(db, user, body.class_id)
     scheme = resolve_scheme(db, body.academic_year_id, klass.grade_id)
     students = db.query(Student).filter_by(class_id=body.class_id).order_by(Student.student_no).all()
-    existing = set()
-    if body.only_missing:
-        have = db.query(EvalRecord).filter_by(academic_year_id=body.academic_year_id).filter(
-            EvalRecord.student_id.in_([s.id for s in students] or [0])).all()
-        existing = {e.student_id for e in have}
-    filled = 0
+    sids = [s.id for s in students]
+    have = db.query(EvalRecord).filter_by(academic_year_id=body.academic_year_id).filter(
+        EvalRecord.student_id.in_(sids or [0])).all()
+    entered_students = {e.student_id for e in have} if body.only_missing else set()
+    existing_pairs = {(e.student_id, e.item_name) for e in have}
+    filled, affected = 0, 0
     for s in students:
-        if s.id in existing:
+        if s.id in entered_students:
             continue
+        student_filled = False
         for item in scheme.items:
             template = item.get("base_template") or ""
-            if not template:
+            if not template or (s.id, item["name"]) in existing_pairs:
                 continue
             score = sum_detail_terms(template)
             db.add(EvalRecord(student_id=s.id, academic_year_id=body.academic_year_id,
                               item_name=item["name"], detail_text=template, score=score))
             filled += 1
+            student_filled = True
+        if student_filled:
+            affected += 1
     db.commit()
-    return {"filled_records": filled, "students_affected": len(students) - len(existing)}
+    return {"filled_records": filled, "students_affected": affected}
