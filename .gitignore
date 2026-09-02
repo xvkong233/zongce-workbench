@@ -45,3 +45,7 @@ Thumbs.db
 
 # husky 生成物（脚本本身保留）
 frontend/.husky/_/
+
+# 演示数据目录：仅生成脚本入库，演示 db 不入库
+demo/*
+!demo/make_demo_db.py

@@ -53,7 +53,8 @@ export default function EvalEntry() {
   const rowTotal = (row) => {
     if (!row.cells) return null
     if (!row.items.some((_, i) => row.cells[i] && (row.cells[i].score !== null && row.cells[i].score !== undefined))) return null
-    return row.items.reduce((acc, it, i) => acc + (itemSubtotal(row, i, roster.items[i]?.max_score) ?? 0), 0)
+    const total = row.items.reduce((acc, it, i) => acc + (itemSubtotal(row, i, roster.items[i]?.max_score) ?? 0), 0)
+    return Math.round(total * 10) / 10
   }
 
   const saveRow = async (row) => {
