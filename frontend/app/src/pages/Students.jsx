@@ -27,9 +27,11 @@ export default function Students() {
     if (!yearId) return { data: [], total: 0, success: true }
     try {
       const sortKey = Object.keys(sort || {}).find((k) => sort[k])
+      // 搜索表单的 学号/姓名 都映射到后端 keyword（后端对学号与姓名模糊匹配）
+      const keyword = params.keyword || params.student_no || params.name || ''
       const r = await api('/base/students', {
         params: {
-          keyword: params.keyword, class_id: params.class_id, major: params.major,
+          keyword, class_id: params.class_id, major: params.major,
           academic_year_id: yearId,
           sort: sortKey || 'student_no',
           order: sortKey ? (sort[sortKey] === 'descend' ? 'desc' : 'asc') : 'asc',

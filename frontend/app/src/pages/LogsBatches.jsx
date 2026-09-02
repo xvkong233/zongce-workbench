@@ -70,14 +70,15 @@ function BatchesTab() {
     <>
       <div style={{ marginBottom: 12 }}>
         <Space>
-          <Popconfirm title="清理 90 天前的批次快照？不影响已入库的业务数据">
-            <Button onClick={async () => {
+          <Popconfirm title="清理 90 天前的批次快照？不影响已入库的业务数据"
+            onConfirm={async () => {
               try {
                 const r = await api('/batches/cleanup?days=90', { method: 'POST' })
                 message.success(`已清理 ${r.cleaned_snapshots} 个批次的快照`)
                 tableRef.current.reload()
               } catch (e) { message.error(e.message) }
-            }}>清理 90 天前快照</Button>
+            }}>
+            <Button>清理 90 天前快照</Button>
           </Popconfirm>
           <span style={{ color: '#999', fontSize: 12 }}>撤销批次将恢复被覆盖的旧值并删除该批新插入记录</span>
         </Space>

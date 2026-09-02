@@ -93,7 +93,7 @@ export default function EvalImport() {
             accept=".xlsx"
             maxCount={1}
             disabled={!ready}
-            fileList={file ? [file] : []}
+            fileList={file ? [{ uid: 'picked', name: file.name, size: file.size, type: file.type }] : []}
             beforeUpload={(f) => { setFile(f); doPreview(f, yearId, gradeId); return false }}
             onRemove={reset}
           >

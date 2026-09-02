@@ -91,7 +91,7 @@ export default function ScoreImport() {
           maxCount={1}
           beforeUpload={(f) => { setFile(f); doPreview(f); return false }}
           onRemove={() => { setFile(null); setPreview(null) }}
-          fileList={file ? [file] : []}
+          fileList={file ? [{ uid: 'picked', name: file.name, size: file.size, type: file.type }] : []}
         >
           <p className="ant-upload-drag-icon"><InboxOutlined /></p>
           <p className="ant-upload-text">点击或拖拽成绩文件到此处</p>

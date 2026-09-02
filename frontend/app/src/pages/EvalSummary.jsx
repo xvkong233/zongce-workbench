@@ -33,6 +33,10 @@ export default function EvalSummary() {
   useEffect(() => { load() }, [yearId, gradeId, classId, keyword, major])
 
   const doExport = async (brief) => {
+    if (!yearId || !gradeId) {
+      message.warning('请先选择学年与年级')
+      return
+    }
     try {
       const exportClassIds = classId ? [classId]
         : (major ? classes.filter((c) => c.major_effective === major).map((c) => c.id) : [])
@@ -86,7 +90,8 @@ export default function EvalSummary() {
         <Select key="c" placeholder="全部班级" style={{ width: 150 }} value={classId} allowClear
           options={classes.map((c) => ({ value: c.id, label: c.name }))} onChange={setClassId} />,
         <Input key="k" placeholder="学号/姓名" style={{ width: 140 }} allowClear
-          onPressEnter={(e) => { setKeyword(e.target.value.trim()) }} />,
+          onPressEnter={(e) => { setKeyword(e.target.value.trim()) }}
+          onChange={(e) => { if (!e.target.value) setKeyword('') }} />,
         <Button key="b" icon={<DownloadOutlined />} onClick={() => doExport(true)}>简表</Button>,
         <Button key="w" type="primary" color="blue" variant="solid" icon={<DownloadOutlined />}
           onClick={() => doExport(false)}>完整工作簿</Button>,

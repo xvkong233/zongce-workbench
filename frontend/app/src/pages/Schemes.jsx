@@ -188,11 +188,7 @@ function GradeSchemes() {
         </Form.Item>
         <Space>
           <Button type="primary" color="blue" variant="solid" htmlType="submit">保存年级专属方案</Button>
-          {rows.length > 0 && (
-            <Popconfirm title="选择年级并清除其专属方案（恢复跟随默认）">
-              <span><ClearGradeScheme years={years} yearId={yearId} rows={rows} grades={grades} onDone={reload} /></span>
-            </Popconfirm>
-          )}
+          {rows.length > 0 && <ClearGradeScheme years={years} yearId={yearId} rows={rows} grades={grades} onDone={reload} />}
         </Space>
       </Form>
     </div>
@@ -214,7 +210,9 @@ function ClearGradeScheme({ yearId, rows, grades, onDone }) {
     <Space>
       <Select style={{ width: 160 }} placeholder="选择年级" value={gid} onChange={setGid}
         options={rows.map((r) => ({ value: r.grade_id, label: grades.find((g) => g.id === r.grade_id)?.name || r.grade_id }))} />
-      <Button danger icon={<DeleteOutlined />} onClick={doClear}>清除专属方案</Button>
+      <Popconfirm title="确认清除该年级的专属方案？（恢复跟随默认方案）" onConfirm={doClear}>
+        <Button danger icon={<DeleteOutlined />}>清除专属方案</Button>
+      </Popconfirm>
     </Space>
   )
 }
