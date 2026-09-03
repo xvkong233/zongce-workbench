@@ -5,10 +5,13 @@
 """
 import io
 import os
+import sys
 import tempfile
 
 # 必须在导入 app 之前设置：app.database 在导入时即固化 DB 路径
 os.environ["ZONGCE_DATA_DIR"] = tempfile.mkdtemp(prefix="zongce-test-")
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
