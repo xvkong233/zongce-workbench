@@ -1,12 +1,15 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { PageContainer, ProCard } from '@ant-design/pro-components'
 import { App as AntdApp, Alert, Button, Select, Space, Switch } from 'antd'
 import { DownloadOutlined } from '@ant-design/icons'
 import { api, download } from '../api.js'
+import { confirmExportWithIssues } from './exportGuard.jsx'
 import { useGrades, useYears } from './hooks.js'
 
 export default function ExportCenter() {
-  const { message } = AntdApp.useApp()
+  const { message, modal } = AntdApp.useApp()
+  const navigate = useNavigate()
   const years = useYears()
   const grades = useGrades()
   const [yearId, setYearId] = useState(undefined)
@@ -19,6 +22,8 @@ export default function ExportCenter() {
       message.warning('请选择学年与至少一个年级')
       return
     }
+    const proceed = await confirmExportWithIssues({ modal, navigate, yearId, gradeIds })
+    if (!proceed) return
     setLoading(true)
     try {
       const res = await api('/export/workbook', {

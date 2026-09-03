@@ -1,13 +1,16 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { PageContainer, ProCard } from '@ant-design/pro-components'
 import { App as AntdApp, Button, Input, Select, Table, Tag } from 'antd'
 import { DownloadOutlined } from '@ant-design/icons'
 import { api, download } from '../api.js'
+import { confirmExportWithIssues } from './exportGuard.jsx'
 import { useClasses, useGrades, useYears } from './hooks.js'
 import StudentReportDrawer from './StudentReportDrawer.jsx'
 
 export default function EvalSummary() {
-  const { message } = AntdApp.useApp()
+  const { message, modal } = AntdApp.useApp()
+  const navigate = useNavigate()
   const years = useYears()
   const grades = useGrades()
   const [yearId, setYearId] = useState(null)
@@ -37,9 +40,13 @@ export default function EvalSummary() {
       message.warning('请先选择学年与年级')
       return
     }
+    const exportClassIds = classId ? [classId]
+      : (major ? classes.filter((c) => c.major_effective === major).map((c) => c.id) : [])
+    const proceed = await confirmExportWithIssues({
+      modal, navigate, yearId, gradeIds: [gradeId], classIds: exportClassIds,
+    })
+    if (!proceed) return
     try {
-      const exportClassIds = classId ? [classId]
-        : (major ? classes.filter((c) => c.major_effective === major).map((c) => c.id) : [])
       const res = await api('/export/workbook', {
         method: 'POST', raw: true,
         body: { academic_year_id: yearId, grade_ids: gradeId ? [gradeId] : [], class_ids: exportClassIds, brief },

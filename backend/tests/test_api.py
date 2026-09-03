@@ -187,6 +187,34 @@ def test_save_capped_detail_not_reported(env):
     assert r.status_code == 200 and r.json()["mismatches"] == ["思想品德"]
 
 
+def test_overview_reports_eval_mismatches(env):
+    """总览按年级统计数据有误人数，/overview/eval-mismatches 返回项目级明细。"""
+    sid = _student_id(env["admin_h"], "20250001")
+    base = [{"item_name": n, "detail_text": "", "score": 0} for n in
+            ("社会工作", "科研及科技创新", "文体活动", "集体建设")]
+    items = [{"item_name": "思想品德", "detail_text": "基础分+23\n积极分子+3", "score": 20}, *base]
+    r = client.put("/api/evals/save", headers=env["admin_h"],
+                   json={"student_id": sid, "academic_year_id": env["year_id"], "items": items})
+    assert r.status_code == 200 and r.json()["mismatches"] == ["思想品德"]
+
+    o = client.get("/api/overview", headers=env["admin_h"],
+                   params={"academic_year_id": env["year_id"]}).json()
+    assert o["totals"]["eval_mismatch_students"] >= 1
+    row25 = next(g for g in o["grade_rows"] if g["grade_name"] == "25级")
+    assert row25["eval_mismatch_students"] == 1
+    sample = row25["mismatch_sample"][0]
+    assert sample["student_no"] == "20250001"
+    assert sample["items"][0]["item_name"] == "思想品德"
+    assert sample["items"][0]["diff"] == 6  # 明细和 26 − 得分 20
+
+    r = client.get("/api/overview/eval-mismatches", headers=env["admin_h"],
+                   params={"academic_year_id": env["year_id"]}).json()
+    assert r["count"] >= 1
+    target = next(s for s in r["students"] if s["student_no"] == "20250001")
+    assert target["grade_name"] == "25级" and target["class_name"] == "计科2501"
+    assert target["items"][0]["soft_sum"] == 26 and target["items"][0]["score"] == 20
+
+
 # ---------- 静态托管 ----------
 @pytest.mark.skipif(not DIST.exists(), reason="前端构建产物 dist 不存在（CI 未构建前端）")
 def test_spa_route_blocks_path_traversal():

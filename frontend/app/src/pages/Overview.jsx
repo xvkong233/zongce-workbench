@@ -79,6 +79,9 @@ export default function Overview() {
   const [data, setData] = useState(null)
   const [yearId, setYearId] = useState(null)
   const [drill, setDrill] = useState(null) // 年级行
+  const [drillTab, setDrillTab] = useState('unentered')
+
+  const openDrill = (g, tab) => { setDrill(g); setDrillTab(tab) }
 
   useEffect(() => {
     api('/overview', { params: yearId ? { academic_year_id: yearId } : {} })
@@ -178,17 +181,27 @@ export default function Overview() {
                         status={g.eval_completion >= 100 ? 'success' : 'normal'} />
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ display: 'flex', justifyContent: 'space-between',
-                                      alignItems: 'center' }}>
+                                      alignItems: 'flex-start' }}>
                           <b style={{ fontSize: 15 }}>{g.grade_name}</b>
-                          {g.eval_unentered > 0 ? (
-                            <a onClick={() => setDrill(g)}>
-                              <Tag color="orange" style={{ cursor: 'pointer', marginInlineEnd: 0 }}>
-                                未录入 {g.eval_unentered} 人
-                              </Tag>
-                            </a>
-                          ) : (
-                            <Tag color="green" style={{ marginInlineEnd: 0 }}>全员已录入</Tag>
-                          )}
+                          <div style={{ display: 'flex', flexDirection: 'column',
+                                        alignItems: 'flex-end', gap: 4 }}>
+                            {g.eval_unentered > 0 ? (
+                              <a onClick={() => openDrill(g, 'unentered')}>
+                                <Tag color="orange" style={{ cursor: 'pointer', marginInlineEnd: 0 }}>
+                                  未录入 {g.eval_unentered} 人
+                                </Tag>
+                              </a>
+                            ) : (
+                              <Tag color="green" style={{ marginInlineEnd: 0 }}>全员已录入</Tag>
+                            )}
+                            {g.eval_mismatch_students > 0 && (
+                              <a onClick={() => openDrill(g, 'mismatch')}>
+                                <Tag color="red" style={{ cursor: 'pointer', marginInlineEnd: 0 }}>
+                                  数据有误 {g.eval_mismatch_students} 人
+                                </Tag>
+                              </a>
+                            )}
+                          </div>
                         </div>
                         <div style={{ color: '#595959', fontSize: 12, marginTop: 6, lineHeight: 1.9 }}>
                           学生 {g.student_count} 人 · 班级 {g.class_count} 个 · 已录入 {g.eval_entered_students} 人
@@ -210,7 +223,7 @@ export default function Overview() {
         width={620} open={!!drill} onClose={() => setDrill(null)}
       >
         {drill && (
-          <Tabs items={[
+          <Tabs activeKey={drillTab} onChange={setDrillTab} items={[
             { key: 'unentered', label: `未录入名单（${drill.eval_unentered}）`, children: (
               <>
                 <Row gutter={[8, 8]}>
@@ -234,6 +247,28 @@ export default function Overview() {
             { key: 'classes', label: `班级完成度（${drill.class_count}）`, children: (
               <Table rowKey="id" size="small" pagination={false}
                 dataSource={drill.classes || []} columns={classColumns} />
+            ) },
+            { key: 'mismatch', label: `数据有误（${drill.eval_mismatch_students}）`, children: (
+              <>
+                <Table rowKey={(r) => r.student_no + r.item_name} size="small" pagination={false}
+                  dataSource={(drill.mismatch_sample || []).flatMap((s) => s.items.map((it) => ({
+                    ...it, key: `${s.student_no}|${it.item_name}`,
+                    student: `${s.name}（${s.student_no}）`, class_name: s.class_name,
+                  })))}
+                  columns={[
+                    { title: '学生', dataIndex: 'student', width: 170 },
+                    { title: '班级', dataIndex: 'class_name', width: 120 },
+                    { title: '项目', dataIndex: 'item_name', width: 110 },
+                    { title: '明细求和', dataIndex: 'soft_sum', width: 80 },
+                    { title: '得分', dataIndex: 'score', width: 70 },
+                    { title: '差额', dataIndex: 'diff', width: 80,
+                      render: (v) => <span style={{ color: '#fa541c' }}>{v > 0 ? `+${v}` : v}</span> },
+                  ]} />
+                {(drill.mismatch_sample?.length || 0) === 0 && <Empty description="无数据有误学生" />}
+                {(drill.eval_mismatch_students || 0) > (drill.mismatch_sample?.length || 0) && (
+                  <div style={{ color: '#999', marginTop: 12 }}>仅显示前 50 人</div>
+                )}
+              </>
             ) },
           ]} />
         )}
