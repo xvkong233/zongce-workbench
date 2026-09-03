@@ -56,6 +56,23 @@ def test_sum_detail_terms():
     assert sum_detail_terms("无") == 0
 
 
+# ---------- 2b. 明细不符判定（求和超满分且得分填满分 = 封顶，不算不符） ----------
+def test_is_detail_mismatch():
+    from app.services.convert import is_detail_mismatch
+    # 求和超满分、得分恰填满分 → 封顶填写，不算不符
+    assert is_detail_mismatch(26, 25, 25) is False
+    assert is_detail_mismatch(25.5, 25, 25) is False
+    # 求和超满分但得分低于满分 → 不符
+    assert is_detail_mismatch(26, 20, 25) is True
+    # 求和未超满分、得分高于求和 → 不符
+    assert is_detail_mismatch(24, 25, 25) is True
+    # 未知该项满分 → 一律按差值判断
+    assert is_detail_mismatch(26, 25, None) is True
+    # 无明细不判；普通不符照旧
+    assert is_detail_mismatch(None, 25, 25) is False
+    assert is_detail_mismatch(22, 25) is True
+
+
 # ---------- 3. 班级/年级推断 ----------
 def test_class_and_grade_inference():
     assert normalize_class_name("建筑类2402班") == "建筑类2402"

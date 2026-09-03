@@ -169,6 +169,24 @@ def test_save_empty_eval_items_creates_no_records(env):
     assert row["entered"] is True
 
 
+def test_save_capped_detail_not_reported(env):
+    """求和超过分项满分、得分恰填满分 → 视为封顶填写，不计明细不符。"""
+    sid = _student_id(env["admin_h"], "20250001")
+
+    def items(score):
+        base = [{"item_name": n, "detail_text": "", "score": 0} for n in
+                ("社会工作", "科研及科技创新", "文体活动", "集体建设")]
+        return [{"item_name": "思想品德", "detail_text": "基础分+23\n积极分子+3", "score": score}, *base]
+
+    r = client.put("/api/evals/save", headers=env["admin_h"], json={
+        "student_id": sid, "academic_year_id": env["year_id"], "items": items(25)})
+    assert r.status_code == 200 and r.json()["mismatches"] == [], r.text
+    # 得分低于满分（求和 26 > 20）→ 仍是不符
+    r = client.put("/api/evals/save", headers=env["admin_h"], json={
+        "student_id": sid, "academic_year_id": env["year_id"], "items": items(20)})
+    assert r.status_code == 200 and r.json()["mismatches"] == ["思想品德"]
+
+
 # ---------- 静态托管 ----------
 @pytest.mark.skipif(not DIST.exists(), reason="前端构建产物 dist 不存在（CI 未构建前端）")
 def test_spa_route_blocks_path_traversal():

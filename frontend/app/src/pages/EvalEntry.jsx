@@ -115,11 +115,14 @@ export default function EvalEntry() {
         width: 260,
         render: (_, row) => {
           const cell = row.cells[itemIdx] || {}
-          // 实时判定（与后端同一套求和规则）：编辑中即可看到是否明细不符
+          // 实时判定（与后端同一套求和规则）：编辑中即可看到是否明细不符；
+          // 求和超过满分而得分恰填满分时视为按封顶填写，不算不符
           const soft = sumDetailTerms(cell.detail_text)
           const score = cell.score ?? 0
+          const capped = soft !== null && it.max_score != null
+            && soft - it.max_score > 0.05 && Math.abs(score - it.max_score) <= 0.05
           const diff = soft === null ? null : Math.round((soft - score) * 100) / 100
-          const mismatch = diff !== null && Math.abs(diff) > 0.05
+          const mismatch = diff !== null && !capped && Math.abs(diff) > 0.05
           return (
             <div>
               <Input.TextArea
@@ -137,7 +140,9 @@ export default function EvalEntry() {
                   </Popover>
                 )}
                 {!mismatch && soft !== null && cell.detail_text && (
-                  <span style={{ color: '#999', fontSize: 12 }}>明细和 {soft}</span>
+                  <span style={{ color: '#999', fontSize: 12 }}>
+                    明细和 {soft}{capped ? `（封顶 ${it.max_score}）` : ''}
+                  </span>
                 )}
               </Space>
             </div>

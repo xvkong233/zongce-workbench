@@ -9,7 +9,8 @@ from sqlalchemy.orm import Session
 
 from ..models import (AcademicYear, ClassInfo, EvalRecord, ImportBatch,
                       OperationLog, Student)
-from .convert import sum_detail_terms
+from .calc import resolve_scheme
+from .convert import is_detail_mismatch, sum_detail_terms
 from .score_import import _as_text, _norm_cell, normalize_class_name
 
 ITEM_HEADER_STOP = ("总分", "合计", "确认签字", "签名")
@@ -167,6 +168,8 @@ def confirm_eval_import(db: Session, parsed: ParsedEvalData, academic_year_id: i
                         operator_id=operator_id)
     db.add(batch)
     db.flush()
+    scheme = resolve_scheme(db, academic_year_id, grade_id)
+    max_by_name = {i["name"]: i.get("max_score") for i in scheme.items}
     stats = {"students_updated": 0, "records_created": 0, "records_overwritten": 0,
              "unmatched": 0, "soft_mismatch": 0}
     unmatched_list = []
@@ -186,7 +189,7 @@ def confirm_eval_import(db: Session, parsed: ParsedEvalData, academic_year_id: i
             score = data.get("score")
             if score is None:
                 score = data.get("soft_sum") or 0.0
-            if data.get("soft_sum") is not None and abs((data.get("soft_sum") or 0) - score) > 0.05:
+            if is_detail_mismatch(data.get("soft_sum"), score, max_by_name.get(item_name)):
                 stats["soft_mismatch"] += 1
             existing = db.query(EvalRecord).filter_by(
                 student_id=student.id, academic_year_id=academic_year_id, item_name=item_name).first()

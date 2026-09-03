@@ -38,3 +38,17 @@ def sum_detail_terms(detail: str) -> float:
     for m in MINUS_TERM.finditer(str(detail or "")):
         total -= float(m.group(1))
     return round(total, 2)
+
+
+def is_detail_mismatch(soft: float | None, score: float | None,
+                       max_score: float | None = None) -> bool:
+    """明细软校验：求和与得分是否不符。
+
+    例外：求和超过该项满分、而得分恰好填了满分时，视为按封顶填写，不算不符
+    （录入页与导入的明细不符提示共用此口径）。"""
+    if soft is None:
+        return False
+    if (max_score is not None and soft - max_score > 1e-9
+            and abs((score or 0) - max_score) <= 0.05):
+        return False
+    return abs(soft - (score or 0)) > 0.05

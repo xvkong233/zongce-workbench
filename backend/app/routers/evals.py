@@ -10,7 +10,7 @@ from ..models import (AcademicYear, ClassInfo, EvalRecord, Grade, ImportBatch,
                       OperationLog, Student, User)
 from ..schemas import CopyPrevIn, EvalBatchIn, EvalSaveIn, FillBaseIn
 from ..services.calc import resolve_scheme
-from ..services.convert import sum_detail_terms
+from ..services.convert import is_detail_mismatch, sum_detail_terms
 from ..services.eval_import import confirm_eval_import, parse_eval_workbook
 
 router = APIRouter(prefix="/evals", tags=["evals"])
@@ -90,6 +90,9 @@ def roster(academic_year_id: int, class_id: int, db: Session = Depends(get_db),
     klass = _class_and_access(db, user, class_id)
     scheme = resolve_scheme(db, academic_year_id, klass.grade_id)
     students = db.query(Student).filter_by(class_id=class_id).order_by(Student.student_no).all()
+    items = [{"name": i["name"], "max_score": i["max_score"],
+              "base_template": i.get("base_template", "")} for i in scheme.items]
+    max_by_name = {i["name"]: i.get("max_score") for i in scheme.items}
     records = db.query(EvalRecord).filter_by(academic_year_id=academic_year_id).filter(
         EvalRecord.student_id.in_([s.id for s in students] or [0])).all()
     by_student: dict[int, dict] = {}
@@ -97,9 +100,7 @@ def roster(academic_year_id: int, class_id: int, db: Session = Depends(get_db),
         soft = sum_detail_terms(r.detail_text) if r.detail_text else None
         by_student.setdefault(r.student_id, {})[r.item_name] = {
             "detail_text": r.detail_text, "score": r.score, "soft_sum": soft,
-            "mismatch": bool(soft is not None and abs(soft - r.score) > 0.05)}
-    items = [{"name": i["name"], "max_score": i["max_score"],
-              "base_template": i.get("base_template", "")} for i in scheme.items]
+            "mismatch": is_detail_mismatch(soft, r.score, max_by_name.get(r.item_name))}
     rows = []
     for s in students:
         item_map = by_student.get(s.id, {})
@@ -127,13 +128,15 @@ def _save_eval_records(db: Session, user: User, body: EvalSaveIn) -> list[str]:
     if not s:
         raise HTTPException(404, {"message": "学生不存在"})
     _class_and_access(db, user, s.class_id)
+    scheme = resolve_scheme(db, body.academic_year_id, s.klass.grade_id if s.klass else None)
+    max_by_name = {i["name"]: i.get("max_score") for i in scheme.items}
     mismatches = []
     for it in body.items:
         empty = not it.detail_text.strip() and it.score == 0
         if empty:
             continue
         soft = sum_detail_terms(it.detail_text) if it.detail_text else None
-        if soft is not None and abs(soft - it.score) > 0.05:
+        if is_detail_mismatch(soft, it.score, max_by_name.get(it.item_name)):
             mismatches.append(it.item_name)
         rec = db.query(EvalRecord).filter_by(student_id=body.student_id,
                                              academic_year_id=body.academic_year_id,
@@ -192,11 +195,13 @@ def eval_import_preview(file: UploadFile = File(...), academic_year_id: int = 0,
             Student.student_no.in_(nos)).all()}
     unmatched = [{"student_no": s.student_no, "name": s.name, "class": s.class_name_raw}
                  for s in parsed.students if s.student_no not in found]
+    scheme = resolve_scheme(db, academic_year_id, grade_id)
+    max_by_name = {i["name"]: i.get("max_score") for i in scheme.items}
     soft_mismatch = 0
     for s in parsed.students:
-        for item in s.items.values():
-            if item.get("soft_sum") is not None and item.get("score") is not None \
-               and abs(item["soft_sum"] - item["score"]) > 0.05:
+        for item_name, item in s.items.items():
+            if item.get("score") is not None and is_detail_mismatch(
+                    item.get("soft_sum"), item["score"], max_by_name.get(item_name)):
                 soft_mismatch += 1
     return {"filename": file.filename, "title": parsed.title, "year": year.name,
             "grade": grade.name,
