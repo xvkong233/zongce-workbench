@@ -2,9 +2,10 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { PageContainer, ProCard, ModalForm, ProFormSelect } from '@ant-design/pro-components'
 import { App as AntdApp, Alert, Button, Input, InputNumber,
-         Popconfirm, Select, Space, Table, Tag } from 'antd'
+         Popconfirm, Popover, Select, Space, Table, Tag } from 'antd'
 import { CopyOutlined, RollbackOutlined, ThunderboltOutlined, UploadOutlined } from '@ant-design/icons'
 import { api } from '../api.js'
+import { detailTerms, sumDetailTerms } from '../evalMath.js'
 import { useClasses, useGrades, useYears } from './hooks.js'
 
 const fmt = (v) => (v === null || v === undefined ? '' : v)
@@ -114,7 +115,11 @@ export default function EvalEntry() {
         width: 260,
         render: (_, row) => {
           const cell = row.cells[itemIdx] || {}
-          const src = row.items[itemIdx] || {}
+          // 实时判定（与后端同一套求和规则）：编辑中即可看到是否明细不符
+          const soft = sumDetailTerms(cell.detail_text)
+          const score = cell.score ?? 0
+          const diff = soft === null ? null : Math.round((soft - score) * 100) / 100
+          const mismatch = diff !== null && Math.abs(diff) > 0.05
           return (
             <div>
               <Input.TextArea
@@ -124,9 +129,15 @@ export default function EvalEntry() {
               <Space>
                 <InputNumber size="small" value={cell.score} step={0.5}
                   onChange={(v) => setCell(rowIdxOf(row), itemIdx, 'score', v)} />
-                {src.mismatch && <Tag color="orange">明细不符</Tag>}
-                {src.soft_sum !== null && src.soft_sum !== undefined && !src.mismatch && cell.detail_text && (
-                  <span style={{ color: '#999', fontSize: 12 }}>明细和 {src.soft_sum}</span>
+                {mismatch && (
+                  <Popover trigger="click" placement="top"
+                    content={<MismatchInfo name={it.name} soft={soft} score={score}
+                                           diff={diff} terms={detailTerms(cell.detail_text)} />}>
+                    <Tag color="orange" style={{ cursor: 'pointer', marginInlineEnd: 0 }}>明细不符</Tag>
+                  </Popover>
+                )}
+                {!mismatch && soft !== null && cell.detail_text && (
+                  <span style={{ color: '#999', fontSize: 12 }}>明细和 {soft}</span>
                 )}
               </Space>
             </div>
@@ -187,6 +198,22 @@ export default function EvalEntry() {
       <CopyPrevModal open={copyOpen} onClose={() => setCopyOpen(false)} years={years}
         yearId={yearId} classId={classId} onDone={() => loadRoster()} />
     </PageContainer>
+  )
+}
+
+function MismatchInfo({ name, soft, score, diff, terms }) {
+  return (
+    <div style={{ fontSize: 12, maxWidth: 300 }}>
+      <div style={{ marginBottom: 6 }}>「{name}」加减分明细求和与得分不一致：</div>
+      <div>明细求和：<b>{soft}</b>
+        {terms.length > 0 && <span style={{ color: '#999' }}>（{terms.join('  ')}）</span>}
+      </div>
+      <div>录入得分：<b>{score}</b></div>
+      <div>差额：<b style={{ color: '#fa8c16' }}>{diff > 0 ? `+${diff}` : diff}</b></div>
+      <div style={{ color: '#999', marginTop: 6 }}>
+        明细中「±数字」的求和应与得分一致（如「基础分+23」计 +23；无符号数字与年份区间不计入）。请核对后修正得分或明细。
+      </div>
+    </div>
   )
 }
 
