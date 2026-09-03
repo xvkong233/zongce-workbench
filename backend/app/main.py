@@ -3,6 +3,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
@@ -12,6 +13,8 @@ from .models import EvalScheme, GradeConversion, User
 from .auth import hash_password
 
 app = FastAPI(title="综测计算工作台", version="1.3.9")
+# 前端构建产物体积较大：gzip 后约缩至 1/3，显著缩短首屏白屏时间
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 
 @app.exception_handler(HTTPException)

@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react'
+import { lazy, Suspense, useMemo, useState } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { ProLayout } from '@ant-design/pro-components'
-import { App as AntdApp } from 'antd'
+import { App as AntdApp, Spin } from 'antd'
 import {
   AuditOutlined, BookOutlined, CloudUploadOutlined, DashboardOutlined,
   ExportOutlined, FormOutlined, ScheduleOutlined, TableOutlined,
@@ -10,17 +10,26 @@ import {
 import { getToken, getUser, setUser, setToken } from './api.js'
 import Login from './pages/Login.jsx'
 import ChangePasswordModal from './pages/ChangePasswordModal.jsx'
-import Overview from './pages/Overview.jsx'
-import ScoreImport from './pages/ScoreImport.jsx'
-import EvalImport from './pages/EvalImport.jsx'
-import EvalEntry from './pages/EvalEntry.jsx'
-import EvalSummary from './pages/EvalSummary.jsx'
-import Students from './pages/Students.jsx'
-import ExportCenter from './pages/ExportCenter.jsx'
-import BaseData from './pages/BaseData.jsx'
-import Accounts from './pages/Accounts.jsx'
-import Schemes from './pages/Schemes.jsx'
-import LogsBatches from './pages/LogsBatches.jsx'
+
+// 路由级代码分割：首屏只加载当前页所需代码，缩短白屏时间
+const Overview = lazy(() => import('./pages/Overview.jsx'))
+const ScoreImport = lazy(() => import('./pages/ScoreImport.jsx'))
+const EvalImport = lazy(() => import('./pages/EvalImport.jsx'))
+const EvalEntry = lazy(() => import('./pages/EvalEntry.jsx'))
+const EvalSummary = lazy(() => import('./pages/EvalSummary.jsx'))
+const Students = lazy(() => import('./pages/Students.jsx'))
+const ExportCenter = lazy(() => import('./pages/ExportCenter.jsx'))
+const BaseData = lazy(() => import('./pages/BaseData.jsx'))
+const Accounts = lazy(() => import('./pages/Accounts.jsx'))
+const Schemes = lazy(() => import('./pages/Schemes.jsx'))
+const LogsBatches = lazy(() => import('./pages/LogsBatches.jsx'))
+
+const PAGE_FALLBACK = (
+  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center',
+                padding: 80 }}>
+    <Spin size="large" tip="加载中…"><span style={{ minWidth: 120 }} /></Spin>
+  </div>
+)
 
 const MENU = [
   { path: '/overview', name: '数据总览', icon: <DashboardOutlined /> },
@@ -70,21 +79,23 @@ function Shell({ user, onLogout }) {
         <a key="logout" onClick={() => { onLogout(); message.success('已退出登录') }}>退出</a>,
       ]}
     >
-      <Routes>
-        <Route path="/" element={<Navigate to="/overview" replace />} />
-        <Route path="/overview" element={<Overview />} />
-        <Route path="/score-import" element={<ScoreImport />} />
-        <Route path="/eval-import" element={<EvalImport />} />
-        <Route path="/evals" element={<EvalEntry />} />
-        <Route path="/summary" element={<EvalSummary />} />
-        <Route path="/students" element={<Students />} />
-        <Route path="/export" element={<ExportCenter />} />
-        <Route path="/base" element={<BaseData />} />
-        <Route path="/users" element={user.role === 'admin' ? <Accounts /> : <Navigate to="/overview" replace />} />
-        <Route path="/schemes" element={user.role === 'admin' ? <Schemes /> : <Navigate to="/overview" replace />} />
-        <Route path="/logs" element={user.role === 'admin' ? <LogsBatches /> : <Navigate to="/overview" replace />} />
-        <Route path="*" element={<Navigate to="/overview" replace />} />
-      </Routes>
+      <Suspense fallback={PAGE_FALLBACK}>
+        <Routes>
+          <Route path="/" element={<Navigate to="/overview" replace />} />
+          <Route path="/overview" element={<Overview />} />
+          <Route path="/score-import" element={<ScoreImport />} />
+          <Route path="/eval-import" element={<EvalImport />} />
+          <Route path="/evals" element={<EvalEntry />} />
+          <Route path="/summary" element={<EvalSummary />} />
+          <Route path="/students" element={<Students />} />
+          <Route path="/export" element={<ExportCenter />} />
+          <Route path="/base" element={<BaseData />} />
+          <Route path="/users" element={user.role === 'admin' ? <Accounts /> : <Navigate to="/overview" replace />} />
+          <Route path="/schemes" element={user.role === 'admin' ? <Schemes /> : <Navigate to="/overview" replace />} />
+          <Route path="/logs" element={user.role === 'admin' ? <LogsBatches /> : <Navigate to="/overview" replace />} />
+          <Route path="*" element={<Navigate to="/overview" replace />} />
+        </Routes>
+      </Suspense>
       <ChangePasswordModal open={pwdOpen} onClose={() => setPwdOpen(false)} />
     </ProLayout>
   )
