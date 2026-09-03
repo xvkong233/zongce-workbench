@@ -103,6 +103,7 @@ docker compose logs -f zongce      # 日志
 docker compose restart             # 重启
 docker compose down                # 停止并删容器（数据保留在卷中）
 docker compose up -d --build       # 升级代码后重建镜像并启动
+./update.sh                        # 一键升级：确认 → 备份数据库 → git pull → 重建 → 健康检查（数据卷只读访问）
 docker volume rm zongce_zongce-data  # ⚠ 彻底清空数据（先确认已有备份）
 ```
 
