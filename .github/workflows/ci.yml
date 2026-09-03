@@ -16,7 +16,8 @@ jobs:
           cache: pip
           cache-dependency-path: backend/requirements.txt
       - name: Install backend dependencies
-        run: pip install -r backend/requirements.txt pytest
+        # httpx2：新版 starlette 的 testclient 强制要求（仅测试用）
+        run: pip install -r backend/requirements.txt pytest httpx2
       - name: Run tests
         working-directory: backend
         run: python -m pytest tests/ -q
