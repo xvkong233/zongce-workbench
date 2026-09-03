@@ -1,7 +1,7 @@
 import { lazy, Suspense, useMemo, useState } from 'react'
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { ProLayout } from '@ant-design/pro-components'
-import { App as AntdApp, Spin } from 'antd'
+import { App as AntdApp, Skeleton } from 'antd'
 import {
   AuditOutlined, BookOutlined, CloudUploadOutlined, DashboardOutlined,
   ExportOutlined, FormOutlined, ScheduleOutlined, TableOutlined,
@@ -24,10 +24,23 @@ const Accounts = lazy(() => import('./pages/Accounts.jsx'))
 const Schemes = lazy(() => import('./pages/Schemes.jsx'))
 const LogsBatches = lazy(() => import('./pages/LogsBatches.jsx'))
 
+// 懒加载兜底骨架屏：模拟典型页面结构（页头 + 统计卡行 + 内容卡），替代转圈
 const PAGE_FALLBACK = (
-  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center',
-                padding: 80 }}>
-    <Spin size="large" tip="加载中…"><span style={{ minWidth: 120 }} /></Spin>
+  <div style={{ padding: '24px 24px 48px' }}>
+    <Skeleton active title={{ width: 160 }} paragraph={{ rows: 1, width: 280 }} />
+    <div style={{ display: 'flex', gap: 16, marginTop: 20, flexWrap: 'wrap' }}>
+      {Array.from({ length: 5 }, (_, i) => (
+        <div key={i} style={{ flex: '1 1 180px', background: '#fff',
+                              border: '1px solid #f0f0f0', borderRadius: 8, padding: 16 }}>
+          <Skeleton active title={false} avatar={{ shape: 'square', size: 44 }}
+                    paragraph={{ rows: 1, width: '65%' }} />
+        </div>
+      ))}
+    </div>
+    <div style={{ marginTop: 16, background: '#fff', border: '1px solid #f0f0f0',
+                  borderRadius: 8, padding: 16 }}>
+      <Skeleton active title paragraph={{ rows: 5 }} />
+    </div>
   </div>
 )
 

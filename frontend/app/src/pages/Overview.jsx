@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { PageContainer, ProCard } from '@ant-design/pro-components'
-import { App as AntdApp, Card, Col, Drawer, Empty, Progress, Row, Select, Spin,
+import { App as AntdApp, Card, Col, Drawer, Empty, Progress, Row, Select, Skeleton,
          Statistic, Table, Tabs, Tag } from 'antd'
 import { CloudUploadOutlined, ExportOutlined, FileDoneOutlined, FormOutlined,
          RightOutlined, SolutionOutlined, TeamOutlined, TrophyOutlined } from '@ant-design/icons'
@@ -28,6 +28,48 @@ function StatCard({ icon, bg, color, label, value, suffix }) {
       <div style={{ ...ICON_BOX, background: bg, color }}>{icon}</div>
       {suffix ?? <Statistic title={label} value={value} />}
     </Card>
+  )
+}
+
+// 数据加载骨架屏：与仪表盘布局一一对应（统计卡行 / 快捷入口行 / 年级卡行）
+function DashboardSkeleton() {
+  return (
+    <>
+      <Row gutter={[16, 16]}>
+        {[5, 5, 5, 4, 5].map((span, i) => (
+          <Col xs={12} sm={12} lg={span} key={i}>
+            <Card size="small" styles={{ body: { display: 'flex', alignItems: 'center', gap: 14 } }}>
+              <Skeleton active title={false} avatar={{ shape: 'square', size: 46 }}
+                        paragraph={{ rows: 1, width: '60%' }} />
+            </Card>
+          </Col>
+        ))}
+      </Row>
+      <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
+        {Array.from({ length: 4 }, (_, i) => (
+          <Col xs={12} lg={6} key={i}>
+            <Card size="small" styles={{ body: { display: 'flex', alignItems: 'center', gap: 12 } }}>
+              <Skeleton active title={false} avatar={{ shape: 'square', size: 46 }}
+                        paragraph={{ rows: 1, width: '70%' }} />
+            </Card>
+          </Col>
+        ))}
+      </Row>
+      <ProCard title="年级综测完成度" style={{ marginTop: 16 }}>
+        <Row gutter={[16, 16]}>
+          {Array.from({ length: 3 }, (_, i) => (
+            <Col xs={24} sm={12} xl={8} key={i}>
+              <Card size="small" styles={{ body: { display: 'flex', gap: 16, alignItems: 'center' } }}>
+                <Skeleton.Avatar active size={92} shape="circle" />
+                <div style={{ flex: 1 }}>
+                  <Skeleton active title={{ width: '40%' }} paragraph={{ rows: 2 }} />
+                </div>
+              </Card>
+            </Col>
+          ))}
+        </Row>
+      </ProCard>
+    </>
   )
 }
 
@@ -66,11 +108,7 @@ export default function Overview() {
           onChange={setYearId} />,
       ]}
     >
-      {!data ? (
-        <div style={{ display: 'flex', justifyContent: 'center', padding: 120 }}>
-          <Spin size="large" tip="加载中…"><span style={{ minWidth: 120 }} /></Spin>
-        </div>
-      ) : (
+      {!data ? <DashboardSkeleton /> : (
         <>
           {/* 全局统计 */}
           <Row gutter={[16, 16]}>
