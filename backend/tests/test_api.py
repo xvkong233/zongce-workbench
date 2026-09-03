@@ -176,3 +176,21 @@ def test_spa_route_blocks_path_traversal():
     assert "Ant Design Pro" not in r.text
     r = client.get("/%2e%2e/%2e%2e/%2e%2e/backend/app/auth.py")
     assert "PBKDF2" not in r.text
+
+
+def test_update_counselor_without_username_field(env):
+    """编辑账号：前端编辑表单不含 username 字段，PUT 不应因 UserIn.username 必填而 422。"""
+    users = client.get("/api/users", headers=env["admin_h"]).json()
+    cc = next(u for u in users if u["username"] == "cc")
+    payload = {"real_name": "导员改", "enabled": True, "grade_ids": [], "password": ""}
+    r = client.put(f"/api/users/{cc['id']}", headers=env["admin_h"], json=payload)
+    assert r.status_code == 200, r.text
+    assert r.json()["real_name"] == "导员改"
+    # 重置密码：旧凭证失效、新密码首登强制改密
+    r = client.put(f"/api/users/{cc['id']}", headers=env["admin_h"],
+                   json={**payload, "password": "new-pass-9"})
+    assert r.status_code == 200
+    assert client.post("/api/auth/login",
+                       json={"username": "cc", "password": "cc-654321"}).status_code == 401
+    r = client.post("/api/auth/login", json={"username": "cc", "password": "new-pass-9"})
+    assert r.status_code == 200 and r.json()["must_change_password"] is True

@@ -9,7 +9,7 @@ from ..auth import get_current_user, hash_password, require_admin
 from ..database import get_db
 from ..models import (AcademicYear, ClassInfo, EvalRecord, Grade, ImportBatch,
                       OperationLog, ScoreRecord, Student, User)
-from ..schemas import ClearDataIn, UserIn
+from ..schemas import ClearDataIn, UserIn, UserUpdateIn
 
 router = APIRouter(tags=["admin"])
 
@@ -47,7 +47,7 @@ def create_user(body: UserIn, db: Session = Depends(get_db), user: User = Depend
 
 
 @router.put("/users/{user_id}")
-def update_user(user_id: int, body: UserIn, db: Session = Depends(get_db),
+def update_user(user_id: int, body: UserUpdateIn, db: Session = Depends(get_db),
                 user: User = Depends(require_admin)):
     u = db.get(User, user_id)
     if not u:

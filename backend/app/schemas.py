@@ -40,6 +40,14 @@ class UserIn(BaseModel):
     grade_ids: list[int] = []
 
 
+class UserUpdateIn(BaseModel):
+    """编辑账号：用户名不可改（编辑表单不含该字段）。"""
+    password: str = ""
+    real_name: str = ""
+    enabled: bool = True
+    grade_ids: list[int] = []
+
+
 class ClassIn(BaseModel):
     name: str
     grade_id: int
