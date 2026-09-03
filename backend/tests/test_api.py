@@ -215,6 +215,29 @@ def test_overview_reports_eval_mismatches(env):
     assert target["items"][0]["soft_sum"] == 26 and target["items"][0]["score"] == 20
 
 
+def test_delete_counselor_with_logs_and_batches(env):
+    """删除产生过操作日志/导入批次的辅导员：应成功，日志保留（operator 置空）。"""
+    client.post("/api/users", headers=env["admin_h"], json={
+        "username": "dd", "password": "dd-123456", "real_name": "待删",
+        "enabled": True, "grade_ids": []})
+    tok = client.post("/api/auth/login", json={"username": "dd", "password": "dd-123456"}).json()["token"]
+    client.put("/api/auth/password", json={"old_password": "dd-123456", "new_password": "dd-654321"},
+               headers={"Authorization": f"Bearer {tok}"})
+    hd = _login("dd", "dd-654321")
+    # dd 产生操作日志（新建年级）
+    client.post("/api/base/grades", headers=hd, json={"name": "27级"})
+    uid = next(u["id"] for u in client.get("/api/users", headers=env["admin_h"]).json()
+               if u["username"] == "dd")
+    r = client.delete(f"/api/users/{uid}", headers=env["admin_h"])
+    assert r.status_code == 200, r.text
+    assert all(u["username"] != "dd" for u in client.get("/api/users", headers=env["admin_h"]).json())
+    # 日志保留：操作人名仍可查（operator_id 已置空）
+    logs = client.get("/api/logs", headers=env["admin_h"], params={"operator": "dd"}).json()
+    assert logs["total"] >= 1
+    # 再次删除 → 404
+    assert client.delete(f"/api/users/{uid}", headers=env["admin_h"]).status_code == 404
+
+
 # ---------- 静态托管 ----------
 @pytest.mark.skipif(not DIST.exists(), reason="前端构建产物 dist 不存在（CI 未构建前端）")
 def test_spa_route_blocks_path_traversal():

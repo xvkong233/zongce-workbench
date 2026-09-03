@@ -80,6 +80,12 @@ def delete_user(user_id: int, db: Session = Depends(get_db), user: User = Depend
         raise HTTPException(400, {"message": "不能删除当前登录账号"})
     if u.role == "admin":
         raise HTTPException(400, {"message": "管理员账号不支持删除"})
+    # 该账号产生过的操作日志与导入批次保留（审计留痕，operator_name 已冗余存储），
+    # 仅将操作人外键置空，否则 FK 约束会导致删除 500
+    db.query(OperationLog).filter(OperationLog.operator_id == user_id).update(
+        {OperationLog.operator_id: None}, synchronize_session=False)
+    db.query(ImportBatch).filter(ImportBatch.operator_id == user_id).update(
+        {ImportBatch.operator_id: None}, synchronize_session=False)
     db.delete(u)
     db.add(OperationLog(operator_id=user.id, operator_name=user.username,
                         action="删除辅导员", detail=u.username))
