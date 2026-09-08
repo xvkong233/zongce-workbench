@@ -137,7 +137,7 @@ def _file_payload(idx: int, tf: TranscriptFile) -> dict:
         "file_index": idx, "filename": tf.filename,
         "student_no": tf.student_no, "name": tf.name, "class_name": tf.class_name,
         "college": tf.college, "major": tf.major, "gpa_total": tf.gpa_total,
-        "error": tf.error,
+        "error": tf.error, "create_student": tf.create_student,
         "rows": [{
             "seq": r.seq, "course_name": r.course_name, "year": r.year,
             "semester": r.semester, "credit": r.credit, "score_raw": r.score_raw,
@@ -164,6 +164,7 @@ def transcript_preview(files: list[UploadFile] = File(...), db: Session = Depend
         "row_count": len(rows),
         "new_count": sum(1 for r in rows if r["status"] == "new"),
         "overwrite_count": sum(1 for r in rows if r["status"] == "overwrite"),
+        "create_student_count": sum(1 for p in payloads if p["create_student"]),
         "exception_count": (sum(1 for r in rows if r["exception"])
                             + sum(len(p["exceptions"]) for p in payloads)
                             + sum(1 for p in payloads if p["error"])),

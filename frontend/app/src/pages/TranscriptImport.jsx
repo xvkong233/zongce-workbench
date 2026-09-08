@@ -47,6 +47,10 @@ function TranscriptFileCard({ file, selected, onChange }) {
         <Alert type="error" showIcon message={file.error} />
       ) : (
         <>
+          {file.create_student && (
+            <Alert type="warning" showIcon style={{ marginBottom: 8 }}
+              message={`该学号不在系统中，确认入库后将按成绩单自动创建学生（班级：${file.class_name}）`} />
+          )}
           <Descriptions size="small" column={4} style={{ marginBottom: 8 }}>
             <Descriptions.Item label="学生">{file.name}（{file.student_no}）</Descriptions.Item>
             <Descriptions.Item label="班级">{file.class_name || '—'}</Descriptions.Item>
@@ -171,10 +175,12 @@ export default function TranscriptImport() {
       for (const f of files) fd.append('files', f)
       fd.append('plan', JSON.stringify({ include }))
       const r = await api('/scores/transcript/confirm', { method: 'POST', form: fd })
+      const s = r.stats || {}
       modal.success({
         title: '成绩单补录成功',
-        content: `新建记录 ${r.stats.records_created ?? 0} 条，覆盖 ${r.stats.records_overwritten ?? 0} 条。` +
-          '可在「日志与批次」中整批回滚。',
+        content: `新建记录 ${s.records_created ?? 0} 条，覆盖 ${s.records_overwritten ?? 0} 条` +
+          (s.students_created ? `，自动创建学生 ${s.students_created} 人` : '') +
+          '。可在「日志与批次」中整批回滚。',
       })
       reset()
     } catch (e) {
@@ -201,7 +207,8 @@ export default function TranscriptImport() {
           <p className="ant-upload-text">点击或拖拽成绩单 PDF 到此处（可多份）</p>
           <p className="ant-upload-hint">
             支持教务处导出的学生成绩单 PDF；按「学号 + 学年 + 学期 + 课程名」与已有成绩匹配，
-            已有记录为覆盖更正，缺失记录为补录新增，入库后可整批回滚
+            已有记录为覆盖更正，缺失记录为补录新增；学号不在系统时自动按成绩单班级建档，
+            入库后可整批回滚
           </p>
         </Upload.Dragger>
       </ProCard>
@@ -218,13 +225,18 @@ export default function TranscriptImport() {
           }
         >
           {(preview.student_count > 0 || preview.row_count > 0) && (
-            <Descriptions size="small" column={4} style={{ marginBottom: 16 }}>
+            <Descriptions size="small" column={5} style={{ marginBottom: 16 }}>
               <Descriptions.Item label="学生">{preview.student_count} 人</Descriptions.Item>
               <Descriptions.Item label="课程记录">{preview.row_count} 条</Descriptions.Item>
               <Descriptions.Item label="新增 / 覆盖">
                 <Typography.Text type="success">{preview.new_count}</Typography.Text>
                 {' / '}
                 <Typography.Text type="secondary">{preview.overwrite_count}</Typography.Text>
+              </Descriptions.Item>
+              <Descriptions.Item label="自动建档">
+                {preview.create_student_count > 0
+                  ? <Typography.Text type="warning">{preview.create_student_count} 人</Typography.Text>
+                  : '无'}
               </Descriptions.Item>
               <Descriptions.Item label="待关注">
                 {preview.exception_count > 0

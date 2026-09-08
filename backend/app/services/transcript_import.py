@@ -15,10 +15,11 @@ from dataclasses import dataclass, field
 import pymupdf
 from sqlalchemy.orm import Session
 
-from ..models import (AcademicYear, ImportBatch, OperationLog, ScoreRecord,
-                      Student)
+from ..models import (AcademicYear, ClassInfo, College, Grade, ImportBatch,
+                      OperationLog, ScoreRecord, Student)
 from .convert import convert_level, parse_number
-from .score_import import SEMESTER_ALIASES, normalize_class_name
+from .score_import import (SEMESTER_ALIASES, infer_enrollment_year,
+                           infer_grade_name, normalize_class_name)
 
 # 表头键值对标签（第 1 页网格 + 第 2 页「学号：xxx」两种版式）
 LABELS = ("姓名", "学院", "入学时间", "性别", "专业", "预计毕业时间", "学号", "班级", "学制")
@@ -67,7 +68,9 @@ class TranscriptFile:
     class_name: str = ""
     college: str = ""
     major: str = ""
+    enrollment_year: int | None = None   # 成绩单「入学时间」，年级推断兜底
     gpa_total: float | None = None
+    create_student: bool = False         # 学号不在系统：确认入库时自动建档
     rows: list[TranscriptRow] = field(default_factory=list)
     exceptions: list[dict] = field(default_factory=list)
     error: str = ""                # 文件级错误（无法解析 / 学生不存在等），非空则整份跳过
@@ -75,6 +78,11 @@ class TranscriptFile:
     @property
     def student_label(self) -> str:
         return f"{self.name or '未知姓名'}（{self.student_no or '未知学号'}）"
+
+    def inferred_grade_name(self) -> str | None:
+        """年级名：班级名数字推断优先，「入学时间」年份兜底。"""
+        return infer_grade_name(self.class_name) or \
+            (f"{self.enrollment_year % 100}级" if self.enrollment_year else None)
 
 
 def _visual_lines(page) -> list[tuple[float, list[tuple[float, float, str]]]]:
@@ -230,6 +238,9 @@ def parse_transcript_pdf(filename: str, data: bytes,
         tf.class_name = normalize_class_name(info.get("班级", ""))
         tf.college = info.get("学院", "")
         tf.major = info.get("专业", "")
+        m_enroll = re.match(r"(\d{4})", info.get("入学时间", ""))
+        if m_enroll:
+            tf.enrollment_year = int(m_enroll.group(1))
         if not tf.student_no:
             tf.error = "未识别到学号，请确认上传的是正式成绩单"
             return tf
@@ -280,15 +291,30 @@ def _build_row(seq: int, name: str, term: str,
 
 
 def match_transcripts(db: Session, files: list[TranscriptFile], allowed_grade_ids=None) -> None:
-    """对照数据库标记每行 new/overwrite/error；allowed_grade_ids=None 表示管理员（不限制）。"""
+    """对照数据库标记每行 new/overwrite/error；allowed_grade_ids=None 表示管理员（不限制）。
+
+    学号不在系统时不再整份跳过：按成绩单班级/学院/专业标记「确认后自动建档」；
+    但班级缺失或推断年级已存在且越权时仍拦截。"""
     years = {y.name: y.id for y in db.query(AcademicYear).all()}
     students = {s.student_no: s for s in db.query(Student).all()}
+    grade_ids = {g.id for g in db.query(Grade).all()}
     for tf in files:
         student = students.get(tf.student_no) if tf.student_no else None
         if student is None:
-            tf.error = tf.error or "系统中不存在该学号的学生，请先在「学生管理」导入"
-            for r in tf.rows:
-                r.status, r.exception = "error", r.exception or "学生不存在"
+            if not tf.class_name:
+                tf.error = tf.error or "成绩单缺少班级信息，无法自动创建学生"
+            elif tf.inferred_grade_name() is None:
+                tf.error = tf.error or "无法从班级名/入学时间推断年级，无法自动创建学生"
+            elif allowed_grade_ids is not None:
+                grade = db.query(Grade).filter_by(name=tf.inferred_grade_name()).first()
+                if grade is not None and grade.id not in allowed_grade_ids:
+                    tf.error = (f"成绩单班级 {tf.class_name} 属于 {grade.name}，"
+                                f"不在所辖年级，无权导入")
+            if tf.error:
+                for r in tf.rows:
+                    r.status, r.exception = "error", r.exception or "学生不存在"
+                continue
+            tf.create_student = True   # 行保持 new，照常参与勾选与补录
             continue
         grade_id = student.klass.grade_id if student.klass else None
         if allowed_grade_ids is not None and grade_id not in allowed_grade_ids:
@@ -329,6 +355,45 @@ def match_transcripts(db: Session, files: list[TranscriptFile], allowed_grade_id
                     "系统中该课程已有多条记录，覆盖后仍可能有重复计分，建议核对"
 
 
+def _create_student_chain(db: Session, tf: TranscriptFile, user,
+                          grades: dict, classes: dict, colleges: dict,
+                          stats: dict, batch: ImportBatch) -> Student:
+    """学号不在系统：按成绩单信息自动创建 年级→学院→班级→学生。
+    辅导员新建的年级自动与其绑定（§4.1.3，与长表导入口径一致）。"""
+    gname = tf.inferred_grade_name()
+    grade = grades.get(gname)
+    if grade is None:
+        grade = Grade(name=gname, enrollment_year=infer_enrollment_year(gname))
+        if user is not None and user.role == "counselor":
+            user.grades.append(grade)
+        db.add(grade)
+        db.flush()
+        grades[gname] = grade
+        stats["grades_created"] = stats.get("grades_created", 0) + 1
+    klass = classes.get(tf.class_name)
+    if klass is None:
+        college = colleges.get(tf.college) if tf.college else None
+        if college is None and tf.college:
+            college = College(name=tf.college)
+            db.add(college)
+            db.flush()
+            colleges[tf.college] = college
+            stats["colleges_created"] = stats.get("colleges_created", 0) + 1
+        klass = ClassInfo(name=tf.class_name, grade_id=grade.id,
+                          college_id=college.id if college else None,
+                          major=tf.major or None)
+        db.add(klass)
+        db.flush()
+        classes[tf.class_name] = klass
+        stats["classes_created"] = stats.get("classes_created", 0) + 1
+    student = Student(student_no=tf.student_no, name=tf.name or tf.student_no,
+                      class_id=klass.id)
+    db.add(student)
+    db.flush()
+    stats["students_created"] = stats.get("students_created", 0) + 1
+    return student
+
+
 def confirm_transcript_import(db: Session, files: list[TranscriptFile],
                               include: dict[int, list[int]] | None,
                               user, filename_label: str) -> ImportBatch:
@@ -340,11 +405,20 @@ def confirm_transcript_import(db: Session, files: list[TranscriptFile],
 
     years = {y.name: y.id for y in db.query(AcademicYear).all()}
     students = {s.student_no: s for s in db.query(Student).all()}
+    grades = {g.name: g for g in db.query(Grade).all()}
+    classes = {c.name: c for c in db.query(ClassInfo).all()}
+    colleges = {c.name: c for c in db.query(College).all()}
     stats: dict[str, int] = {}
     for idx, tf in enumerate(files):
         if tf.error:
             continue
         student = students.get(tf.student_no)
+        if student is None and tf.create_student:
+            student = _create_student_chain(db, tf, user, grades, classes, colleges, stats, batch)
+            students[tf.student_no] = student
+        if student is None:
+            stats["skipped"] = stats.get("skipped", 0) + len(tf.rows)
+            continue
         allowed = set(include.get(idx, [r.seq for r in tf.rows])) if include is not None \
             else {r.seq for r in tf.rows}
         for r in tf.rows:
@@ -386,7 +460,9 @@ def confirm_transcript_import(db: Session, files: list[TranscriptFile],
                         operator_name=getattr(user, "username", ""),
                         action="成绩单补录",
                         detail=f"{filename_label}：新建{stats.get('records_created', 0)} "
-                               f"覆盖{stats.get('records_overwritten', 0)}"))
+                               f"覆盖{stats.get('records_overwritten', 0)} "
+                               f"学生新建{stats.get('students_created', 0)} "
+                               f"班级新建{stats.get('classes_created', 0)}"))
     db.commit()
     db.refresh(batch)
     return batch

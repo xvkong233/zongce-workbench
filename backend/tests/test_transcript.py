@@ -37,13 +37,19 @@ def _put(page, x, y, text, size=10):
     page.insert_text((x, y), str(text), fontname=font, fontsize=size)
 
 
-def make_transcript_pdf(student_no, name, klass, rows, gpa="3.5000"):
+def make_transcript_pdf(student_no, name, klass, rows, gpa="3.5000",
+                        college="江河建筑学院", major=None, enroll="2024-08",
+                        with_class=True):
     """rows: [(序号, 课程名, 学年学期, 学分, 成绩, 类别)]。数据行用与真实成绩单一致的
     紧凑字号，避免「学年学期」过宽与学分列重叠、被 pymupdf 并成一个词。"""
     doc = pymupdf.open()
     page = doc.new_page()
-    _put(page, 40, 54, f"姓名 {name} 学院 江河建筑学院 入学时间 2024-08")
-    _put(page, 40, 74, f"学号 {student_no} 班级 {klass} 学制 5")
+    head1 = f"姓名 {name} 学院 {college} 入学时间 {enroll}"
+    if major:
+        head1 += f" 专业 {major}"
+    _put(page, 40, 54, head1)
+    head2 = f"学号 {student_no} " + (f"班级 {klass} " if with_class else "") + "学制 5"
+    _put(page, 40, 74, head2)
     for label, x in [("序号", 38), ("课程名称", 197), ("学年学期", 375),
                      ("学分", 446), ("成绩", 488), ("课程类别", 526)]:
         _put(page, x, 94, label)
@@ -246,19 +252,70 @@ def test_match_by_course_name_with_long_table(env):
     assert math["course_code"] == "A1500011"  # 覆盖不改课程代码
 
 
-def test_unknown_student_and_scope(env):
+def test_auto_create_student(env):
+    """学号不在系统：按成绩单班级/学院/专业自动建档后正常补录。"""
     h = env["admin_h"]
-    pv = _preview(h, ("x.pdf", make_transcript_pdf("20999999", "不在册", "建筑类2402", ROWS_3)))
-    assert pv["student_count"] == 0
-    assert "不存在" in pv["files"][0]["error"]
-    out = _confirm(h, None, ("x.pdf", make_transcript_pdf("20999999", "不在册", "建筑类2402", ROWS_3)))
-    assert out["stats"].get("records_created", 0) == 0
+    # ① 已有班级：只补学生
+    pv = _preview(h, ("n1.pdf", make_transcript_pdf("20246680", "王小二", "建筑类2402", ROWS_3)))
+    f0 = pv["files"][0]
+    assert f0["error"] == "" and f0["create_student"] is True
+    assert [r["status"] for r in f0["rows"]] == ["new"] * 3
+    out = _confirm(h, None, ("n1.pdf", make_transcript_pdf("20246680", "王小二", "建筑类2402", ROWS_3)))
+    assert out["stats"]["students_created"] == 1
+    assert out["stats"]["records_created"] == 3
+    students = client.get("/api/base/students", headers=h, params={"page_size": 100}).json()["items"]
+    s = next(x for x in students if x["student_no"] == "20246680")
+    assert s["class_name"] == "建筑类2402"
+    assert len(client.get("/api/scores/records", headers=h,
+                          params={"student_id": s["id"]}).json()) == 3
 
-    # 辅导员只辖 25级：24级学生的成绩单 → 整份无权，确认不产生任何记录
-    pv2 = _preview(env["tcc_h"], _pdf())
-    assert "无权" in pv2["files"][0]["error"]
-    out2 = _confirm(env["tcc_h"], None, _pdf())
-    assert out2["stats"].get("records_created", 0) == 0
+    # ② 全新 年级+班级+学院（机械2301 → 23级），专业写入班级
+    pdf2 = ("n2.pdf", make_transcript_pdf("20231111", "李四", "机械2301", ROWS_3[:1],
+                                          college="机械工程学院", major="机械类", enroll="2023-08"))
+    out2 = _confirm(h, None, pdf2)
+    assert out2["stats"]["grades_created"] == 1
+    assert out2["stats"]["classes_created"] == 1
+    assert out2["stats"]["colleges_created"] == 1
+    assert out2["stats"]["students_created"] == 1
+    grades = {g["name"] for g in client.get("/api/base/grades", headers=h).json()}
+    assert "23级" in grades
+    klass = next(c for c in client.get("/api/base/classes", headers=h).json()
+                 if c["name"] == "机械2301")
+    assert klass["grade_name"] == "23级" and klass["college_name"] == "机械工程学院"
+    assert klass["major"] == "机械类"
+
+    # ③ 班级名无数字 → 用「入学时间」推断年级（2022-08 → 22级）
+    out3 = _confirm(h, None, ("n3.pdf", make_transcript_pdf(
+        "20225555", "周五", "强基计划", ROWS_3[:1], enroll="2022-08")))
+    assert out3["stats"]["grades_created"] == 1
+    grades = {g["name"] for g in client.get("/api/base/grades", headers=h).json()}
+    assert "22级" in grades
+
+    # ④ 缺班级：整份拦截
+    pv4 = _preview(h, ("n4.pdf", make_transcript_pdf("20249911", "吴七", "", ROWS_3[:1],
+                                                     with_class=False)))
+    assert "无法自动创建" in pv4["files"][0]["error"]
+    out4 = _confirm(h, None, ("n4.pdf", make_transcript_pdf(
+        "20249911", "吴七", "", ROWS_3[:1], with_class=False)))
+    assert out4["stats"].get("records_created", 0) == 0
+
+
+def test_scope_rules(env):
+    """辅导员越权规则：已有学生看所在年级；自动建档看成绩单班级推断的年级。"""
+    tcc = env["tcc_h"]
+    # 已有 24级 学生 → 整份无权
+    pv = _preview(tcc, _pdf())
+    assert "无权" in pv["files"][0]["error"]
+    out = _confirm(tcc, None, _pdf())
+    assert out["stats"].get("records_created", 0) == 0
+    # 新学生落在所辖 25级 的已有班级 → 允许自动建档
+    out2 = _confirm(tcc, None, ("t.pdf", make_transcript_pdf(
+        "20258888", "赵六", "计科2501", ROWS_3[:1])))
+    assert out2["stats"]["students_created"] == 1
+    assert out2["stats"]["records_created"] == 1
+    # 新学生落在所辖年级之外的新班级（机械2301 → 23级）→ 拦截
+    pv3 = _preview(tcc, ("u.pdf", make_transcript_pdf("20237777", "孙七", "机械2301", ROWS_3[:1])))
+    assert "无权" in pv3["files"][0]["error"]
 
 
 def test_dedup_within_file():
