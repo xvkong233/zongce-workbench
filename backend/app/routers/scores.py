@@ -13,6 +13,8 @@ from ..models import (AcademicYear, ClassInfo, Grade, GradeConversion, Student,
 from ..services.score_import import (confirm_score_import, find_conflicts_with_db,
                                      infer_enrollment_year, infer_grade_name,
                                      parse_score_workbook)
+from ..services.transcript_import import (TranscriptFile, confirm_transcript_import,
+                                          match_transcripts, parse_transcript_pdf)
 from .base_data import _class_item
 
 router = APIRouter(prefix="/scores", tags=["scores"])
@@ -122,6 +124,69 @@ async def exceptions_export(exceptions: list[dict],
     buf.seek(0)
     return StreamingResponse(iter([buf.getvalue().encode("utf-8-sig")]), media_type="text/csv",
                              headers={"Content-Disposition": "attachment; filename=exceptions.csv"})
+
+
+# ---------- 成绩单 PDF 补录 ----------
+def _parse_transcripts(db: Session, files) -> list[TranscriptFile]:
+    return [parse_transcript_pdf(f.filename, f.file.read(), _conversion_map(db))
+            for f in files]
+
+
+def _file_payload(idx: int, tf: TranscriptFile) -> dict:
+    return {
+        "file_index": idx, "filename": tf.filename,
+        "student_no": tf.student_no, "name": tf.name, "class_name": tf.class_name,
+        "college": tf.college, "major": tf.major, "gpa_total": tf.gpa_total,
+        "error": tf.error,
+        "rows": [{
+            "seq": r.seq, "course_name": r.course_name, "year": r.year,
+            "semester": r.semester, "credit": r.credit, "score_raw": r.score_raw,
+            "score_num": r.score_num, "course_category": r.course_category,
+            "retake_type": r.retake_type, "status": r.status,
+            "existing_score_raw": r.existing_score_raw, "exception": r.exception,
+        } for r in tf.rows],
+        "exceptions": tf.exceptions,
+    }
+
+
+@router.post("/transcript/preview")
+def transcript_preview(files: list[UploadFile] = File(...), db: Session = Depends(get_db),
+                       user: User = Depends(get_current_user)):
+    if not files:
+        raise HTTPException(400, {"message": "请至少上传一份成绩单 PDF"})
+    parsed = _parse_transcripts(db, files)
+    match_transcripts(db, parsed, counselor_grade_ids(user))
+    payloads = [_file_payload(i, tf) for i, tf in enumerate(parsed)]
+    rows = [r for p in payloads for r in p["rows"] if not p["error"]]
+    return {
+        "files": payloads,
+        "student_count": sum(1 for tf in parsed if tf.rows and not tf.error),
+        "row_count": len(rows),
+        "new_count": sum(1 for r in rows if r["status"] == "new"),
+        "overwrite_count": sum(1 for r in rows if r["status"] == "overwrite"),
+        "exception_count": (sum(1 for r in rows if r["exception"])
+                            + sum(len(p["exceptions"]) for p in payloads)
+                            + sum(1 for p in payloads if p["error"])),
+    }
+
+
+@router.post("/transcript/confirm")
+def transcript_confirm(files: list[UploadFile] = File(...), plan: str = Form(default="{}"),
+                       db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    import json
+    try:
+        plan_obj = json.loads(plan)
+    except json.JSONDecodeError:
+        raise HTTPException(400, {"message": "plan 参数不是合法 JSON"})
+    if not files:
+        raise HTTPException(400, {"message": "请至少上传一份成绩单 PDF"})
+    parsed = _parse_transcripts(db, files)
+    match_transcripts(db, parsed, counselor_grade_ids(user))
+    include = {int(k): v for k, v in (plan_obj.get("include") or {}).items()}
+    names = [f.filename for f in files]
+    label = names[0] if len(names) == 1 else f"{names[0]} 等 {len(names)} 份成绩单"
+    batch = confirm_transcript_import(db, parsed, include or None, user, label)
+    return {"batch_id": batch.id, "stats": batch.stats}
 
 
 @router.get("/template")

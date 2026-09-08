@@ -1,12 +1,16 @@
 import { useState } from 'react'
 import { PageContainer, ProCard } from '@ant-design/pro-components'
-import { App as AntdApp, Alert, Button, Descriptions, Form, Select, Table, Tag, Upload } from 'antd'
+import {
+  Alert, App as AntdApp, Button, Card, Descriptions, Form, Select,
+  Table, Tabs, Tag, Upload,
+} from 'antd'
 import { DownloadOutlined, InboxOutlined } from '@ant-design/icons'
 import { api, download } from '../api.js'
+import TranscriptImport from './TranscriptImport.jsx'
 
 const EXC_COLORS = { 缺学号: 'red', 缺课程代码: 'red', 未知等级: 'orange', 缺学分: 'gold', 缺绩点: 'gold', 未知学期: 'blue', 班级归属冲突: 'purple' }
 
-export default function ScoreImport() {
+function LongTableImport() {
   const { message, modal } = AntdApp.useApp()
   const [file, setFile] = useState(null)
   const [preview, setPreview] = useState(null)
@@ -81,11 +85,11 @@ export default function ScoreImport() {
   }
 
   return (
-    <PageContainer content="上传教务成绩长表，系统自动识别学年/学期、换算等级、生成预览与异常清单；可先下载样例表格核对格式。"
-      extra={[
-        <Button key="tpl" icon={<DownloadOutlined />} onClick={downloadTemplate}>下载样例表格</Button>,
-      ]}>
-      <ProCard style={{ marginBottom: 16 }}>
+    <>
+      <ProCard
+        title="选择成绩长表文件"
+        extra={<Button icon={<DownloadOutlined />} onClick={downloadTemplate}>下载样例表格</Button>}
+        style={{ marginBottom: 16 }}>
         <Upload.Dragger
           accept=".xls,.xlsx"
           maxCount={1}
@@ -179,6 +183,29 @@ export default function ScoreImport() {
           />
         </ProCard>
       )}
+    </>
+  )
+}
+
+export default function ScoreImport() {
+  const items = [
+    {
+      key: 'long',
+      label: '成绩长表导入',
+      children: <LongTableImport />,
+    },
+    {
+      key: 'transcript',
+      label: '成绩单补录（PDF）',
+      children: <TranscriptImport />,
+    },
+  ]
+  return (
+    <PageContainer
+      content="两种成绩入口：教务成绩长表（.xls/.xlsx）整班导入；个别学生缺成绩时，上传教务正式成绩单 PDF 按课程补录。">
+      <Card variant="borderless" styles={{ body: { padding: '0 24px 24px' } }}>
+        <Tabs defaultActiveKey="long" items={items} destroyOnHidden={false} />
+      </Card>
     </PageContainer>
   )
 }
