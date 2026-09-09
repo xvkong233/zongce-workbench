@@ -128,8 +128,153 @@ async def exceptions_export(exceptions: list[dict],
 
 # ---------- 成绩单 PDF 补录 ----------
 def _parse_transcripts(db: Session, files) -> list[TranscriptFile]:
-    return [parse_transcript_pdf(f.filename, f.file.read(), _conversion_map(db))
-            for f in files]
+    conversion = _conversion_map(db)
+    parsed: list[TranscriptFile] = []
+    for f in files:
+        name = f.filename or ""
+        data = f.file.read()
+        lower = name.lower()
+        if lower.endswith(".zip"):
+            parsed.extend(_expand_zip(name, data, conversion))
+        elif lower.endswith(".rar"):
+            parsed.extend(_expand_rar(name, data, conversion))
+        elif lower.endswith(".7z"):
+            parsed.extend(_expand_7z(name, data, conversion))
+        elif lower.endswith((".tar", ".gz")):
+            parsed.append(TranscriptFile(
+                filename=name, error="暂不支持该压缩格式，请改用 zip/rar/7z 压缩包"))
+        else:
+            parsed.append(parse_transcript_pdf(name, data, conversion))
+    return parsed
+
+
+def _archive_base(entry: str) -> str:
+    """包内路径 → 文件名（兼容 / 与 \\ 分隔）。"""
+    return entry.replace("\\", "/").rsplit("/", 1)[-1]
+
+
+def _want_entry(entry: str) -> bool:
+    """只展开普通 PDF：跳过目录、隐藏文件（. / ._ 开头）与 __MACOSX。"""
+    base = _archive_base(entry)
+    if base.startswith((".", "._")) or "__MACOSX" in entry:
+        return False
+    return base.lower().endswith(".pdf")
+
+
+def _parse_archive_entries(archive_name: str, entries: list[tuple[str, bytes | None]],
+                           conversion: dict[str, float]) -> list[TranscriptFile]:
+    """entries: [(包内路径, PDF 字节)]，字节为 None 表示该条目解压失败（单独报错）。
+    包内无 PDF 时返回单张错误卡片。"""
+    out: list[TranscriptFile] = []
+    for entry, blob in entries:
+        if not _want_entry(entry):
+            continue
+        base = _archive_base(entry)
+        if blob is None:
+            out.append(TranscriptFile(filename=base, error="压缩包内该文件解压失败"))
+            continue
+        out.append(parse_transcript_pdf(base, blob, conversion))
+    return out or [TranscriptFile(filename=archive_name, error="压缩包中未找到 PDF 成绩单")]
+
+
+def _zip_entry_name(info) -> str:
+    """压缩包内文件名解码：未打 UTF-8 标志位的条目按 Windows 常见 GBK 修复，
+    避免中文文件名显示为 cp437 乱码。"""
+    if info.flag_bits & 0x800:
+        return info.filename
+    try:
+        raw = info.filename.encode("cp437")
+    except UnicodeEncodeError:
+        return info.filename
+    for enc in ("utf-8", "gbk"):
+        try:
+            return raw.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return info.filename
+
+
+def _expand_zip(zip_name: str, data: bytes,
+                conversion: dict[str, float]) -> list[TranscriptFile]:
+    import zipfile
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(data))
+    except Exception:
+        return [TranscriptFile(filename=zip_name, error="无法打开压缩包，请确认上传的是 zip 文件")]
+    entries: list[tuple[str, bytes | None]] = []
+    with zf:
+        for info in zf.infolist():
+            if info.is_dir():
+                continue
+            entry = _zip_entry_name(info)
+            if not _want_entry(entry):
+                continue
+            try:
+                entries.append((entry, zf.read(info)))
+            except Exception:
+                entries.append((entry, None))
+    return _parse_archive_entries(zip_name, entries, conversion)
+
+
+def _expand_rar(zip_name: str, data: bytes,
+                conversion: dict[str, float]) -> list[TranscriptFile]:
+    """rar：元数据由 rarfile 纯 Python 解析，提取依赖外部 unrar/unar 工具
+    （Docker 镜像已内置 unar；缺失时整包报错提示，不影响其他文件）。"""
+    try:
+        import rarfile
+        from rarfile import PasswordRequired, RarCannotExec
+    except ImportError:
+        return [TranscriptFile(filename=zip_name, error="服务器未安装 rar 解压组件（rarfile）")]
+    try:
+        rf = rarfile.RarFile(io.BytesIO(data))
+        infos = [i for i in rf.infolist() if not i.is_dir()]
+    except PasswordRequired:
+        return [TranscriptFile(filename=zip_name, error="rar 压缩包已加密，请解密后重新打包上传")]
+    except RarCannotExec:
+        return [TranscriptFile(
+            filename=zip_name,
+            error="服务器缺少 unrar/unar 工具，无法解压 rar，请联系管理员安装（Docker 镜像已内置）")]
+    except Exception:
+        return [TranscriptFile(filename=zip_name, error="无法打开 rar 压缩包，请确认文件完整")]
+    entries: list[tuple[str, bytes | None]] = []
+    for info in infos:
+        if not _want_entry(info.filename):
+            continue
+        try:
+            entries.append((info.filename, rf.read(info)))
+        except Exception:
+            entries.append((info.filename, None))
+    return _parse_archive_entries(zip_name, entries, conversion)
+
+
+def _expand_7z(zip_name: str, data: bytes,
+               conversion: dict[str, float]) -> list[TranscriptFile]:
+    import os
+    import tempfile
+    try:
+        import py7zr
+        from py7zr.exceptions import PasswordRequired
+    except ImportError:
+        return [TranscriptFile(filename=zip_name, error="服务器未安装 7z 解压组件（py7zr）")]
+    entries: list[tuple[str, bytes | None]] = []
+    try:
+        with tempfile.TemporaryDirectory() as tmp, \
+                py7zr.SevenZipFile(io.BytesIO(data)) as zf:
+            names = [n for n in zf.getnames() if _want_entry(n)]
+            if names:
+                zf.extract(path=tmp, targets=names)
+                for name in names:
+                    fp = os.path.join(tmp, *name.replace("\\", "/").split("/"))
+                    try:
+                        with open(fp, "rb") as fh:
+                            entries.append((name, fh.read()))
+                    except OSError:
+                        entries.append((name, None))
+    except PasswordRequired:
+        return [TranscriptFile(filename=zip_name, error="7z 压缩包已加密，请解密后重新打包上传")]
+    except Exception:
+        return [TranscriptFile(filename=zip_name, error="无法打开 7z 压缩包，请确认文件完整")]
+    return _parse_archive_entries(zip_name, entries, conversion)
 
 
 def _file_payload(idx: int, tf: TranscriptFile) -> dict:

@@ -251,7 +251,7 @@ export default function TranscriptImport() {
     <>
       <ProCard style={{ marginBottom: 16 }}>
         <Upload.Dragger
-          accept=".pdf"
+          accept=".pdf,.zip,.rar,.7z"
           multiple
           fileList={files}
           beforeUpload={(_, fileList) => {
@@ -261,11 +261,11 @@ export default function TranscriptImport() {
           onRemove={onRemove}
         >
           <p className="ant-upload-drag-icon"><InboxOutlined /></p>
-          <p className="ant-upload-text">点击或拖拽成绩单 PDF 到此处（可多份）</p>
+          <p className="ant-upload-text">点击或拖拽成绩单 PDF / 压缩包到此处（可多份）</p>
           <p className="ant-upload-hint">
-            支持教务处导出的学生成绩单 PDF；按「学号 + 学年 + 学期 + 课程名」与已有成绩匹配，
-            已有记录为覆盖更正，缺失记录为补录新增；学号不在系统时自动建档，
-            可单个或批量指定已有班级、也可按成绩单新建，入库后可整批回滚
+            支持教务处导出的学生成绩单 PDF 及 zip / rar / 7z 压缩包（自动解包，zip 中文文件名兼容）；
+            按「学号 + 学年 + 学期 + 课程名」与已有成绩匹配，已有记录为覆盖更正，缺失记录为补录新增；
+            学号不在系统时自动建档，可单个或批量指定已有班级、也可按成绩单新建，入库后可整批回滚
           </p>
         </Upload.Dragger>
       </ProCard>

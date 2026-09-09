@@ -18,6 +18,10 @@ ARG USE_CN_MIRROR=true
 WORKDIR /app/backend
 
 COPY backend/requirements.txt ./
+# unar：rarfile 解压 .rar 依赖的外部工具（缺失时 rar 上传会整包报错）
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends unar \
+    && rm -rf /var/lib/apt/lists/*
 RUN if [ "$USE_CN_MIRROR" = "true" ]; then \
         export PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple; \
     fi; \

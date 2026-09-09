@@ -12,7 +12,7 @@ from .database import Base, SessionLocal, engine
 from .models import EvalScheme, GradeConversion, User
 from .auth import hash_password
 
-app = FastAPI(title="综测计算工作台", version="1.4.1")
+app = FastAPI(title="综测计算工作台", version="1.5.0")
 # 前端构建产物体积较大：gzip 后约缩至 1/3，显著缩短首屏白屏时间
 app.add_middleware(GZipMiddleware, minimum_size=1024)
 

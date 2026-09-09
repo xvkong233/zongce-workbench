@@ -7,3 +7,5 @@ openpyxl>=3.1
 PyMuPDF>=1.24
 PyJWT>=2.8
 python-multipart>=0.0.9
+rarfile>=4.2        # .rar 元数据解析；提取需外部 unar/unrar 工具（Docker 镜像已内置 unar）
+py7zr>=0.22         # .7z 解压（纯 Python）

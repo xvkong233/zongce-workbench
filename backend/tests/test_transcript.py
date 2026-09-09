@@ -357,6 +357,100 @@ def test_class_override(env):
     assert s3["class_name"] == "计科2502"
 
 
+def test_zip_upload(env):
+    """压缩包上传：zip 内 PDF 按包内顺序展开解析，非 PDF/隐藏文件跳过；
+    include / class_overrides 按展开后的下标引用；空包/损坏包/不支持格式给出错误卡片。"""
+    import zipfile
+    h = env["admin_h"]
+    pdf1 = make_transcript_pdf("20251111", "测试一", "计科2501", ROWS_3[:1])
+    pdf2 = make_transcript_pdf("20251112", "测试二", "计科2501", ROWS_3[:1])
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("说明.txt", "不是成绩单")
+        zf.writestr("__MACOSX/._隐藏.pdf", b"%PDF-junk")
+        zf.writestr("成绩单/20251111_测试一.pdf", pdf1)
+        zf.writestr("20251112_测试二.pdf", pdf2)
+    pv = _preview(h, ("batch.zip", buf.getvalue()))
+    assert pv["student_count"] == 2 and len(pv["files"]) == 2
+    assert [f["student_no"] for f in pv["files"]] == ["20251111", "20251112"]
+    assert all(f["error"] == "" and f["create_student"] for f in pv["files"])
+
+    # 展开下标：第 1 份只导第 1 行；第 2 份指定已有班级（此处与成绩单班级同名，仅验证索引映射）
+    classes = {c["name"]: c for c in client.get("/api/base/classes", headers=h).json()}
+    out = _confirm(h, json.dumps({
+        "include": {"0": [1]},
+        "class_overrides": {"1": classes["计科2501"]["id"]},
+    }), ("batch.zip", buf.getvalue()))
+    assert out["stats"]["records_created"] == 2
+    assert out["stats"]["students_created"] == 2
+    assert out["stats"].get("classes_created", 0) == 0
+    students = client.get("/api/base/students", headers=h, params={"page_size": 100}).json()["items"]
+    s1 = next(x for x in students if x["student_no"] == "20251111")
+    s2 = next(x for x in students if x["student_no"] == "20251112")
+    assert len(client.get("/api/scores/records", headers=h,
+                          params={"student_id": s1["id"]}).json()) == 1
+    assert len(client.get("/api/scores/records", headers=h,
+                          params={"student_id": s2["id"]}).json()) == 1
+
+    # zip 与散装 PDF 混传：解析顺序 = 上传顺序
+    pv2 = _preview(h, ("m.zip", buf.getvalue()), ("loose.pdf", pdf1))
+    assert [f["student_no"] for f in pv2["files"]] == ["20251111", "20251112", "20251111"]
+
+    # 空包（无 PDF）→ 错误卡片
+    buf2 = io.BytesIO()
+    with zipfile.ZipFile(buf2, "w") as zf:
+        zf.writestr("readme.txt", "no pdf here")
+    pv3 = _preview(h, ("empty.zip", buf2.getvalue()))
+    assert "未找到" in pv3["files"][0]["error"]
+
+    # 损坏 zip / 损坏 rar / 不支持的压缩格式
+    pv4 = _preview(h, ("bad.zip", b"not a zip at all"))
+    assert "无法打开压缩包" in pv4["files"][0]["error"]
+    pv5 = _preview(h, ("bad.rar", b"RAR! garbage"))
+    assert "无法打开 rar" in pv5["files"][0]["error"]
+    pv6 = _preview(h, ("x.gz", b"\x1f\x8b"))
+    assert "不支持该压缩格式" in pv6["files"][0]["error"]
+
+
+def test_7z_upload(env):
+    """7z 压缩包：解包展开其中 PDF，非 PDF 跳过，损坏包给出错误卡片。"""
+    import py7zr
+    h = env["admin_h"]
+    buf = io.BytesIO()
+    with py7zr.SevenZipFile(buf, "w") as zf:
+        zf.writestr(b"not a transcript", "说明.txt")
+        zf.writestr(make_transcript_pdf("20253331", "赵一", "计科2501", ROWS_3[:1]),
+                    "成绩单/20253331_赵一.pdf")
+        zf.writestr(make_transcript_pdf("20253332", "钱二", "计科2501", ROWS_3[:1]),
+                    "20253332_钱二.pdf")
+    pv = _preview(h, ("batch.7z", buf.getvalue()))
+    assert len(pv["files"]) == 2
+    assert [f["student_no"] for f in pv["files"]] == ["20253331", "20253332"]
+    assert all(f["error"] == "" and f["create_student"] for f in pv["files"])
+
+    out = _confirm(h, None, ("batch.7z", buf.getvalue()))
+    assert out["stats"]["students_created"] == 2
+    assert out["stats"]["records_created"] == 2
+    students = client.get("/api/base/students", headers=h, params={"page_size": 100}).json()["items"]
+    for no, nm in [("20253331", "赵一"), ("20253332", "钱二")]:
+        s = next(x for x in students if x["student_no"] == no)
+        assert s["name"] == nm and s["class_name"] == "计科2501"
+
+    # 损坏 7z
+    pv2 = _preview(h, ("bad.7z", b"7z\xbc\xaf garbage"))
+    assert "无法打开 7z" in pv2["files"][0]["error"]
+
+
+def test_zip_gbk_entry_name():
+    """Windows 下 GBK 编码压缩包（无 UTF-8 标志位）的中文文件名修复。"""
+    from collections import namedtuple
+    from app.routers.scores import _zip_entry_name
+    Info = namedtuple("Info", "filename flag_bits")
+    mojibake = "20251111_测试一.pdf".encode("gbk").decode("cp437")
+    assert _zip_entry_name(Info(mojibake, 0)) == "20251111_测试一.pdf"
+    assert _zip_entry_name(Info("20251111_测试一.pdf", 0x800)) == "20251111_测试一.pdf"
+
+
 def test_scope_rules(env):
     """辅导员越权规则：已有学生看所在年级；自动建档看成绩单班级推断的年级。"""
     tcc = env["tcc_h"]
