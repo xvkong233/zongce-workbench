@@ -19,7 +19,14 @@ WORKDIR /app/backend
 
 COPY backend/requirements.txt ./
 # unar：rarfile 解压 .rar 依赖的外部工具（缺失时 rar 上传会整包报错）
-RUN apt-get update \
+# USE_CN_MIRROR=true 时先把 apt 源换成清华镜像——基础镜像默认 deb.debian.org，国内访问慢
+# （trixie 为 deb822 格式：/etc/apt/sources.list.d/debian.sources，security 源同域名一并替换）
+RUN if [ "$USE_CN_MIRROR" = "true" ]; then \
+        for f in /etc/apt/sources.list /etc/apt/sources.list.d/debian.sources; do \
+            [ -f "$f" ] && sed -i "s|deb.debian.org|mirrors.tuna.tsinghua.edu.cn|g; s|security.debian.org|mirrors.tuna.tsinghua.edu.cn|g" "$f" || true; \
+        done; \
+    fi \
+    && apt-get update \
     && apt-get install -y --no-install-recommends unar \
     && rm -rf /var/lib/apt/lists/*
 RUN if [ "$USE_CN_MIRROR" = "true" ]; then \
