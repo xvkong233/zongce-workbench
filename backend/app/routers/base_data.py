@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from ..auth import counselor_grade_ids, get_current_user, require_admin
 from ..database import get_db
-from ..models import (AcademicYear, ClassInfo, College, Grade,
+from ..models import (AcademicYear, ClassInfo, College, EvalScheme, Grade,
                       OperationLog, Student, User)
 from ..schemas import ClassIn, StudentIn
 from ..services.score_import import _as_text
@@ -141,14 +141,36 @@ def create_grade(body: dict, db: Session = Depends(get_db), user: User = Depends
     return {"id": g.id, "name": g.name, "enrollment_year": g.enrollment_year}
 
 
+@router.put("/grades/{grade_id}")
+def update_grade(grade_id: int, body: dict, db: Session = Depends(get_db),
+                 user: User = Depends(require_admin)):
+    g = db.get(Grade, grade_id)
+    if not g:
+        raise HTTPException(404, {"message": "年级不存在"})
+    name = (body.get("name") or "").strip()
+    if not re.fullmatch(r"\d{2}级", name):
+        raise HTTPException(400, {"message": "年级名称格式应为「XX级」，如 24级"})
+    dup = db.query(Grade).filter(Grade.name == name, Grade.id != grade_id).first()
+    if dup:
+        raise HTTPException(400, {"message": "年级已存在"})
+    old = f"{g.name}（{g.enrollment_year}）"
+    g.name = name
+    if body.get("enrollment_year"):
+        g.enrollment_year = body["enrollment_year"]
+    _log(db, user, "修改年级", f"{old} → {g.name}（{g.enrollment_year}）")
+    db.commit()
+    return {"id": g.id, "name": g.name, "enrollment_year": g.enrollment_year}
+
+
 @router.delete("/grades/{grade_id}")
 def delete_grade(grade_id: int, db: Session = Depends(get_db), user: User = Depends(require_admin)):
-    from ..models import ClassInfo
     g = db.get(Grade, grade_id)
     if not g:
         raise HTTPException(404, {"message": "年级不存在"})
     if db.query(ClassInfo).filter_by(grade_id=grade_id).count():
         raise HTTPException(400, {"message": "该年级下仍有班级，无法删除"})
+    if db.query(EvalScheme).filter_by(grade_id=grade_id).count():
+        raise HTTPException(400, {"message": "该年级存在专属综测方案，请先在综测方案中删除"})
     _log(db, user, "删除年级", g.name)
     db.delete(g)
     db.commit()

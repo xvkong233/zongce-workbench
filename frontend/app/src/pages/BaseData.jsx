@@ -126,23 +126,39 @@ function ClassesTab({ data, grades, colleges, onChanged }) {
 
 function GradesTab({ data, onChanged }) {
   const { message } = AntdApp.useApp()
-  const [open, setOpen] = useState(false)
+  const [editing, setEditing] = useState(null) // null | {} | record
   const [form] = Form.useForm()
+  useEffect(() => {
+    if (editing !== null) {
+      form.setFieldsValue(editing.id ? editing : { name: '', enrollment_year: undefined })
+    }
+  }, [editing])
   const save = async () => {
     const v = await form.validateFields()
     try {
-      await api('/base/grades', { method: 'POST', body: v })
-      message.success('已新建'); setOpen(false); form.resetFields(); data.reload(); onChanged()
+      if (editing.id) await api(`/base/grades/${editing.id}`, { method: 'PUT', body: v })
+      else await api('/base/grades', { method: 'POST', body: v })
+      message.success('已保存'); setEditing(null); data.reload(); onChanged()
     } catch (e) { message.error(e.message) }
   }
   return (
     <>
-      <TableWrap data={data} addLabel="新建年级（辅导员将自动绑定）" onAdd={() => setOpen(true)}
+      <TableWrap data={data} addLabel="新建年级（辅导员将自动绑定）" onAdd={() => setEditing({})}
         columns={[
           { title: '年级', dataIndex: 'name', width: 140 },
           { title: '入学年份', dataIndex: 'enrollment_year', width: 140 },
+          { title: '操作', width: 160, render: (_, r) => (
+            <Space>
+              {isAdmin() && <a onClick={() => setEditing(r)}>编辑</a>}
+              {isAdmin() && <Popconfirm title="确认删除该年级？" onConfirm={async () => {
+                try { await api(`/base/grades/${r.id}`, { method: 'DELETE' }); message.success('已删除'); data.reload(); onChanged() }
+                catch (e) { message.error(e.message) }
+              }}><a style={{ color: 'red' }}>删除</a></Popconfirm>}
+              {!isAdmin() && <span style={{ color: '#ccc' }}>—</span>}
+            </Space>) },
         ]} />
-      <Modal title="新建年级" open={open} onCancel={() => setOpen(false)} onOk={save} destroyOnHidden>
+      <Modal title={editing?.id ? '编辑年级' : '新建年级'} open={editing !== null}
+        onCancel={() => setEditing(null)} onOk={save} destroyOnHidden>
         <Form form={form} layout="vertical">
           <Form.Item name="name" label="年级名称" rules={[
             { required: true, message: '请输入年级名称' },

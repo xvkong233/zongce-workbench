@@ -266,3 +266,38 @@ def test_update_counselor_without_username_field(env):
                        json={"username": "cc", "password": "cc-654321"}).status_code == 401
     r = client.post("/api/auth/login", json={"username": "cc", "password": "new-pass-9"})
     assert r.status_code == 200 and r.json()["must_change_password"] is True
+
+
+def test_grade_edit_and_delete(env):
+    """年级编辑（改名/入学年份、格式与重名校验、仅管理员）与删除（有班级/专属方案时拦截）。"""
+    ah = env["admin_h"]
+    g = client.post("/api/base/grades", headers=ah, json={"name": "26级"}).json()
+    # 编辑：名称不变（自身）不算重名，可改入学年份
+    r = client.put(f"/api/base/grades/{g['id']}", headers=ah,
+                   json={"name": "26级", "enrollment_year": 2026})
+    assert r.status_code == 200 and r.json()["enrollment_year"] == 2026
+    # 格式 / 重名校验，正常改名
+    assert client.put(f"/api/base/grades/{g['id']}", headers=ah,
+                      json={"name": "26届"}).status_code == 400
+    assert client.put(f"/api/base/grades/{g['id']}", headers=ah,
+                      json={"name": "24级"}).status_code == 400
+    r = client.put(f"/api/base/grades/{g['id']}", headers=ah, json={"name": "28级"})
+    assert r.status_code == 200 and r.json()["name"] == "28级"
+    # 辅导员无权编辑/删除年级（cc 密码已被前序测试重置为 new-pass-9，需重新登录）
+    cc_h = _login("cc", "new-pass-9")
+    assert client.put(f"/api/base/grades/{g['id']}", headers=cc_h,
+                      json={"name": "28级"}).status_code == 403
+    assert client.delete(f"/api/base/grades/{g['id']}", headers=cc_h).status_code == 403
+    # 有班级或专属综测方案的年级不可删
+    g24 = next(x for x in client.get("/api/base/grades", headers=ah).json() if x["name"] == "24级")
+    assert client.delete(f"/api/base/grades/{g24['id']}", headers=ah).status_code == 400
+    scheme = {"weight_academic": 0.8, "weight_eval": 0.2, "retake_rule": "latest",
+              "items": [{"name": "思想品德", "max_score": 25}]}
+    client.put(f"/api/schemes/grade/{g['id']}", headers=ah,
+               params={"academic_year_id": env["year_id"]}, json=scheme)
+    assert client.delete(f"/api/base/grades/{g['id']}", headers=ah).status_code == 400
+    client.delete(f"/api/schemes/grade/{g['id']}", headers=ah,
+                  params={"academic_year_id": env["year_id"]})
+    # 删除成功；再删 → 404
+    assert client.delete(f"/api/base/grades/{g['id']}", headers=ah).status_code == 200
+    assert client.delete(f"/api/base/grades/{g['id']}", headers=ah).status_code == 404
