@@ -4,6 +4,7 @@
 运行：cd backend && python -m pytest tests/ -q
 """
 import io
+import json
 import os
 import sys
 import tempfile
@@ -298,6 +299,62 @@ def test_auto_create_student(env):
     out4 = _confirm(h, None, ("n4.pdf", make_transcript_pdf(
         "20249911", "吴七", "", ROWS_3[:1], with_class=False)))
     assert out4["stats"].get("records_created", 0) == 0
+
+
+def test_class_override(env):
+    """自动建档可指定已有班级：学生落入所选班级且不新建班级/年级；
+    所选班级不存在 → 400；已有学生的文件忽略指定；辅导员只能选所辖年级的班级。"""
+    h = env["admin_h"]
+
+    def _ensure_class(name, grade_id):
+        r = client.post("/api/base/classes", headers=h, json={"name": name, "grade_id": grade_id})
+        if r.status_code == 200:
+            return r.json()
+        return next(c for c in client.get("/api/base/classes", headers=h).json()
+                    if c["name"] == name)
+
+    classes = {c["name"]: c for c in client.get("/api/base/classes", headers=h).json()}
+    target = classes["计科2501"]
+
+    # ① 指定已有班级：只建学生，不新建班级（成绩单班级「建筑2402班」被忽略）
+    out = _confirm(h, json.dumps({"class_overrides": {"0": target["id"]}}),
+                   ("o.pdf", make_transcript_pdf("20247777", "钱八", "建筑2402班", ROWS_3[:1])))
+    assert out["stats"]["students_created"] == 1
+    assert out["stats"].get("classes_created", 0) == 0
+    assert out["stats"].get("grades_created", 0) == 0
+    s = next(x for x in client.get("/api/base/students", headers=h,
+                                   params={"page_size": 100}).json()["items"]
+             if x["student_no"] == "20247777")
+    assert s["class_id"] == target["id"] and s["class_name"] == "计科2501"
+
+    # ② 已有学生的文件：class_overrides 不生效，照常匹配覆盖
+    out2 = _confirm(h, json.dumps({"class_overrides": {"0": target["id"]}}), _pdf())
+    assert out2["stats"].get("students_created", 0) == 0
+    assert out2["stats"].get("records_overwritten", 0) >= 1
+
+    # ③ 所选班级不存在 → 400
+    r = client.post("/api/scores/transcript/confirm", headers=h,
+                    files=[("files", ("p.pdf", make_transcript_pdf(
+                        "20246666", "褚九", "建筑2402班", ROWS_3[:1])))],
+                    data={"plan": json.dumps({"class_overrides": {"0": 999999}})})
+    assert r.status_code == 400, r.text
+
+    # ④ 辅导员选所辖年级之外的班级 → 403；选所辖年级内的班级 → 放行
+    tcc = env["tcc_h"]
+    out_scope = classes["建筑类2402"]
+    r = client.post("/api/scores/transcript/confirm", headers=tcc,
+                    files=[("files", ("q.pdf", make_transcript_pdf(
+                        "20256666", "王五", "计科2501", ROWS_3[:1])))],
+                    data={"plan": json.dumps({"class_overrides": {"0": out_scope["id"]}})})
+    assert r.status_code == 403, r.text
+    in_scope = _ensure_class("计科2502", target["grade_id"])
+    out3 = _confirm(tcc, json.dumps({"class_overrides": {"0": in_scope["id"]}}),
+                    ("r.pdf", make_transcript_pdf("20255555", "冯十", "计科2501", ROWS_3[:1])))
+    assert out3["stats"]["students_created"] == 1
+    s3 = next(x for x in client.get("/api/base/students", headers=tcc,
+                                    params={"page_size": 100}).json()["items"]
+              if x["student_no"] == "20255555")
+    assert s3["class_name"] == "计科2502"
 
 
 def test_scope_rules(env):

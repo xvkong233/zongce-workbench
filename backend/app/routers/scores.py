@@ -182,11 +182,25 @@ def transcript_confirm(files: list[UploadFile] = File(...), plan: str = Form(def
     if not files:
         raise HTTPException(400, {"message": "请至少上传一份成绩单 PDF"})
     parsed = _parse_transcripts(db, files)
-    match_transcripts(db, parsed, counselor_grade_ids(user))
+    allowed = counselor_grade_ids(user)
+    match_transcripts(db, parsed, allowed)
     include = {int(k): v for k, v in (plan_obj.get("include") or {}).items()}
+    # 自动建档文件可指定已有班级（前端从 /base/classes 选择）；此处校验存在性与年级权限
+    class_overrides: dict[int, int] = {}
+    for k, v in (plan_obj.get("class_overrides") or {}).items():
+        idx = int(k)
+        if not (0 <= idx < len(parsed)) or not parsed[idx].create_student:
+            continue  # 该文件已存在学生或无需建档，指定无效
+        klass = db.get(ClassInfo, int(v))
+        if klass is None:
+            raise HTTPException(400, {"message": "所选班级不存在，请刷新班级列表后重试"})
+        if allowed is not None and klass.grade_id not in allowed:
+            raise HTTPException(403, {"message": f"班级「{klass.name}」不在所辖年级，无权导入到该班级"})
+        class_overrides[idx] = klass.id
     names = [f.filename for f in files]
     label = names[0] if len(names) == 1 else f"{names[0]} 等 {len(names)} 份成绩单"
-    batch = confirm_transcript_import(db, parsed, include or None, user, label)
+    batch = confirm_transcript_import(db, parsed, include or None, user, label,
+                                      class_overrides or None)
     return {"batch_id": batch.id, "stats": batch.stats}
 
 

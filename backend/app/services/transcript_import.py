@@ -396,8 +396,12 @@ def _create_student_chain(db: Session, tf: TranscriptFile, user,
 
 def confirm_transcript_import(db: Session, files: list[TranscriptFile],
                               include: dict[int, list[int]] | None,
-                              user, filename_label: str) -> ImportBatch:
-    """include: {文件下标: [行序号]}，None = 全部。仅导入 status != error 且被选中的行。"""
+                              user, filename_label: str,
+                              class_overrides: dict[int, int] | None = None) -> ImportBatch:
+    """include: {文件下标: [行序号]}，None = 全部。仅导入 status != error 且被选中的行。
+
+    class_overrides: {文件下标: 已有班级 id}——自动建档时用户指定的目标班级，
+    指定后不再走 年级→学院→班级 创建链（存在性与年级权限由路由层预先校验）。"""
     batch = ImportBatch(kind="score", filename=filename_label,
                         operator_id=user.id if user is not None else None)
     db.add(batch)
@@ -414,7 +418,16 @@ def confirm_transcript_import(db: Session, files: list[TranscriptFile],
             continue
         student = students.get(tf.student_no)
         if student is None and tf.create_student:
-            student = _create_student_chain(db, tf, user, grades, classes, colleges, stats, batch)
+            klass = db.get(ClassInfo, (class_overrides or {}).get(idx) or 0)
+            if klass is not None:
+                student = Student(student_no=tf.student_no,
+                                  name=tf.name or tf.student_no, class_id=klass.id)
+                db.add(student)
+                db.flush()
+                stats["students_created"] = stats.get("students_created", 0) + 1
+            else:
+                student = _create_student_chain(db, tf, user, grades, classes,
+                                                colleges, stats, batch)
             students[tf.student_no] = student
         if student is None:
             stats["skipped"] = stats.get("skipped", 0) + len(tf.rows)

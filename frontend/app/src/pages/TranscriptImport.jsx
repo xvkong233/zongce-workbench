@@ -1,7 +1,7 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ProCard } from '@ant-design/pro-components'
 import {
-  Alert, App as AntdApp, Button, Card, Descriptions, Space, Table, Tag, Tooltip,
+  Alert, App as AntdApp, Button, Card, Descriptions, Select, Space, Table, Tag, Tooltip,
   Typography, Upload,
 } from 'antd'
 import { FilePdfOutlined, InboxOutlined } from '@ant-design/icons'
@@ -12,6 +12,13 @@ const STATUS = {
   overwrite: { color: 'blue', text: '覆盖' },
   error: { color: 'red', text: '跳过' },
 }
+
+const NEW_CLASS = '__new__'   // 不选已有班级：按成绩单信息新建班级建档
+
+const classOption = (c) => ({
+  value: c.id,
+  label: `${c.name}（${c.grade_name}${c.college_name ? ` · ${c.college_name}` : ''}）`,
+})
 
 function scoreCell(r) {
   const converted = r.score_num !== null && String(r.score_num) !== r.score_raw
@@ -27,7 +34,7 @@ function scoreCell(r) {
   )
 }
 
-function TranscriptFileCard({ file, selected, onChange }) {
+function TranscriptFileCard({ file, fileIndex, selected, onChange, classes, pick, onPick }) {
   const rowKeys = file.rows.filter((r) => r.status !== 'error').map((r) => r.seq)
   const checkedCount = rowKeys.filter((k) => selected.has(k)).length
   return (
@@ -49,7 +56,20 @@ function TranscriptFileCard({ file, selected, onChange }) {
         <>
           {file.create_student && (
             <Alert type="warning" showIcon style={{ marginBottom: 8 }}
-              message={`该学号不在系统中，确认入库后将按成绩单自动创建学生（班级：${file.class_name}）`} />
+              message={
+                <Space wrap size={8}>
+                  <span>该学号不在系统中，确认入库后将自动创建学生，请选择其班级：</span>
+                  <Select
+                    size="small" style={{ minWidth: 240 }} showSearch
+                    optionFilterProp="label" value={pick}
+                    onChange={(v) => onPick(fileIndex, v)}
+                    options={[
+                      ...classes.map(classOption),
+                      { value: NEW_CLASS, label: `按成绩单新建班级「${file.class_name}」` },
+                    ]}
+                  />
+                </Space>
+              } />
           )}
           <Descriptions size="small" column={4} style={{ marginBottom: 8 }}>
             <Descriptions.Item label="学生">{file.name}（{file.student_no}）</Descriptions.Item>
@@ -116,6 +136,36 @@ export default function TranscriptImport() {
   // {文件下标: Set(选中的行序号)}；null 表示全选
   const [selection, setSelection] = useState(null)
   const [confirming, setConfirming] = useState(false)
+  const [classes, setClasses] = useState([])     // 自动建档时可选的已有班级（按角色过滤）
+  // {文件下标: 班级 id | NEW_CLASS}；未设置时默认「同名已有班级，否则按成绩单新建」
+  const [classPicks, setClassPicks] = useState({})
+  const [batchClassId, setBatchClassId] = useState(undefined)   // 批量设置班级
+
+  // 预览中存在待建档学生时才拉取班级列表
+  useEffect(() => {
+    if (preview?.create_student_count > 0 && classes.length === 0) {
+      api('/base/classes').then(setClasses).catch(() => {})
+    }
+  }, [preview])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  const pickOf = (f, idx) => {
+    if (classPicks[idx] !== undefined) return classPicks[idx]
+    const same = classes.find((c) => c.name === f.class_name)
+    return same ? same.id : NEW_CLASS
+  }
+
+  // 本批待建档（学号不在系统且解析无错）的文件，可对其批量设置班级
+  const createFiles = preview
+    ? preview.files.map((f, idx) => ({ f, idx })).filter(({ f }) => !f.error && f.create_student)
+    : []
+
+  const applyBatchClass = () => {
+    if (!batchClassId || createFiles.length === 0) return
+    const picks = { ...classPicks }
+    for (const { idx } of createFiles) picks[idx] = batchClassId
+    setClassPicks(picks)
+    message.success(`已将 ${createFiles.length} 份待建档文件的目标班级统一设置`)
+  }
 
   const doPreview = async (list) => {
     if (!list.length) { setPreview(null); setSelection(null); return }
@@ -125,6 +175,8 @@ export default function TranscriptImport() {
       const pv = await api('/scores/transcript/preview', { method: 'POST', form: fd })
       setPreview(pv)
       setSelection(null)
+      setClassPicks({})
+      setBatchClassId(undefined)
     } catch (e) {
       message.error(e.message)
     }
@@ -148,7 +200,8 @@ export default function TranscriptImport() {
 
   const reset = () => {
     filesRef.current = []
-    setPreview(null); setFiles([]); setSelection(null)
+    setPreview(null); setFiles([]); setSelection(null); setClassPicks({})
+    setBatchClassId(undefined)
   }
 
   const selFor = (idx, file) => {
@@ -166,14 +219,18 @@ export default function TranscriptImport() {
   const doConfirm = async () => {
     if (!preview || selectedCount() === 0) return
     const include = {}
+    const class_overrides = {}
     preview.files.forEach((f, idx) => {
       if (!f.error) include[idx] = [...selFor(idx, f)].sort((a, b) => a - b)
+      if (!f.error && f.create_student && pickOf(f, idx) !== NEW_CLASS) {
+        class_overrides[idx] = pickOf(f, idx)   // 指定已有班级建档
+      }
     })
     setConfirming(true)
     try {
       const fd = new FormData()
       for (const f of files) fd.append('files', f)
-      fd.append('plan', JSON.stringify({ include }))
+      fd.append('plan', JSON.stringify({ include, class_overrides }))
       const r = await api('/scores/transcript/confirm', { method: 'POST', form: fd })
       const s = r.stats || {}
       modal.success({
@@ -207,8 +264,8 @@ export default function TranscriptImport() {
           <p className="ant-upload-text">点击或拖拽成绩单 PDF 到此处（可多份）</p>
           <p className="ant-upload-hint">
             支持教务处导出的学生成绩单 PDF；按「学号 + 学年 + 学期 + 课程名」与已有成绩匹配，
-            已有记录为覆盖更正，缺失记录为补录新增；学号不在系统时自动按成绩单班级建档，
-            入库后可整批回滚
+            已有记录为覆盖更正，缺失记录为补录新增；学号不在系统时自动建档，
+            可单个或批量指定已有班级、也可按成绩单新建，入库后可整批回滚
           </p>
         </Upload.Dragger>
       </ProCard>
@@ -245,11 +302,27 @@ export default function TranscriptImport() {
               </Descriptions.Item>
             </Descriptions>
           )}
+          {createFiles.length > 0 && (
+            <Space wrap style={{ marginBottom: 16 }}>
+              <Typography.Text>批量设置待建档学生的班级：</Typography.Text>
+              <Select style={{ minWidth: 240 }} showSearch optionFilterProp="label"
+                placeholder="选择班级" value={batchClassId}
+                onChange={setBatchClassId}
+                options={classes.map(classOption)} />
+              <Button disabled={!batchClassId} onClick={applyBatchClass}>
+                应用到全部待建档文件（{createFiles.length} 份）
+              </Button>
+            </Space>
+          )}
           {preview.files.map((f, idx) => (
             <TranscriptFileCard key={`${f.file_index}-${f.filename}`}
               file={f}
+              fileIndex={idx}
               selected={selFor(idx, f)}
-              onChange={(s) => setSelection({ ...selection, [idx]: s })} />
+              onChange={(s) => setSelection({ ...selection, [idx]: s })}
+              classes={classes}
+              pick={pickOf(f, idx)}
+              onPick={(i, v) => setClassPicks({ ...classPicks, [i]: v })} />
           ))}
         </ProCard>
       )}
